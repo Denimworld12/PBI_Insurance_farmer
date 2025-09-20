@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "owner": "Rajinder Singh",
+        "parcelId": "Khewat1234",
+        "village": "Chandpur",
+        "tehsil": "Ludhiana East",
+        "district": "Ludhiana"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [75.8480, 30.9000],
+            [75.8500, 30.9000],
+            [75.8500, 30.9020],
+            [75.8480, 30.9020],
+            [75.8480, 30.9000]
+          ]
+        ]
+      }
+    }
+  ]
+}

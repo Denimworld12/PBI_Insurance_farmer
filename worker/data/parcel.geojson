@@ -1,0 +1,19 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "test-parcel-1" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [77.5946, 12.9716],
+          [77.6046, 12.9716],
+          [77.6046, 12.9816],
+          [77.5946, 12.9816],
+          [77.5946, 12.9716]
+        ]]
+      }
+    }
+  ]
+}

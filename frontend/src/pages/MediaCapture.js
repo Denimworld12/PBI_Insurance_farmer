@@ -13,7 +13,7 @@ const CAPTURE_STEPS = [
 ];
 
 function formatOverlay(ts, lat, lon) {
-    const weekday = ts.toLocaleDateString(undefined, { weekday: "long" });
+    const weekday = ts.toLocaleDateString('en-US', { weekday: "long" });
     const dd = String(ts.getDate()).padStart(2, "0");
     const mm = String(ts.getMonth() + 1).padStart(2, "0");
     const yyyy = ts.getFullYear();
@@ -35,10 +35,12 @@ export default function MediaCapture() {
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
     const [finalResult, setFinalResult] = useState(null);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         initializeCamera();
         getCurrentLocation();
+
         return () => {
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
@@ -48,37 +50,68 @@ export default function MediaCapture() {
 
     const initializeCamera = async () => {
         try {
+            console.log('🎥 Initializing camera...');
+
+            // Request camera permissions
             const mediaStream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: 'environment', // Back camera for mobile
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 },
                 audio: currentStep === CAPTURE_STEPS.length - 1 // Audio only for video
             });
 
+            console.log('✅ Camera initialized successfully');
             setStream(mediaStream);
+
             if (videoRef.current) {
                 videoRef.current.srcObject = mediaStream;
+                videoRef.current.play();
             }
+
         } catch (error) {
-            console.error('Camera initialization failed:', error);
-            alert('Camera access is required. Please enable camera permissions.');
+            console.error('❌ Camera initialization failed:', error);
+            let errorMessage = 'Camera access failed. ';
+
+            if (error.name === 'NotAllowedError') {
+                errorMessage += 'Please allow camera permissions.';
+            } else if (error.name === 'NotFoundError') {
+                errorMessage += 'No camera found.';
+            } else {
+                errorMessage += error.message;
+            }
+
+            setError(errorMessage);
         }
     };
 
     const getCurrentLocation = () => {
         if ('geolocation' in navigator) {
+            console.log('🌍 Getting current location...');
+
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    setCoords({
+                    const location = {
                         lat: position.coords.latitude,
                         lon: position.coords.longitude
-                    });
+                    };
+                    console.log('✅ Location obtained:', location);
+                    setCoords(location);
                 },
                 (error) => {
-                    console.error('Geolocation error:', error);
-                    alert('Location access is required for claim verification.');
+                    console.error('❌ Geolocation error:', error);
+                    let errorMessage = 'Location access failed. ';
+
+                    if (error.code === error.PERMISSION_DENIED) {
+                        errorMessage += 'Please allow location permissions.';
+                    } else if (error.code === error.POSITION_UNAVAILABLE) {
+                        errorMessage += 'Location unavailable.';
+                    } else {
+                        errorMessage += error.message;
+                    }
+
+                    setError(errorMessage);
                 },
                 {
                     enableHighAccuracy: true,
@@ -86,48 +119,85 @@ export default function MediaCapture() {
                     maximumAge: 60000
                 }
             );
+        } else {
+            setError('Geolocation not supported by this browser.');
         }
     };
 
     const capturePhoto = async () => {
-        if (!videoRef.current || !canvasRef.current || !coords) return;
+        if (!videoRef.current || !canvasRef.current || !coords) {
+            console.error('❌ Missing required elements for photo capture');
+            return;
+        }
 
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        try {
+            console.log('📸 Capturing photo...');
+            setLoading(true);
 
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
 
-        // Add timestamp and coordinates overlay
-        const ts = new Date();
-        const overlayText = formatOverlay(ts, coords.lat, coords.lon);
+            // Set canvas dimensions to match video
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
 
-        const pad = 12;
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
-        const fontSize = Math.max(18, canvas.width * 0.018);
-        ctx.font = `${fontSize}px sans-serif`;
-        const textWidth = ctx.measureText(overlayText).width;
-        const stripW = textWidth + pad * 2;
-        const stripH = fontSize + pad * 2;
-        const x = 16, y = canvas.height - stripH - 16;
-        ctx.fillRect(x, y, stripW, stripH);
-        ctx.fillStyle = "#000";
-        ctx.fillText(overlayText, x + pad, y + fontSize + 2);
+            const ctx = canvas.getContext('2d');
 
-        const blob = await new Promise(resolve =>
-            canvas.toBlob(resolve, 'image/jpeg', 0.9)
-        );
+            // Draw current video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        await uploadMedia(blob, CAPTURE_STEPS[currentStep], ts);
+            // Add timestamp and coordinates overlay
+            const timestamp = new Date();
+            const overlayText = formatOverlay(timestamp, coords.lat, coords.lon);
+
+            // Style the overlay
+            const fontSize = Math.max(16, canvas.width * 0.02);
+            ctx.font = `${fontSize}px Arial, sans-serif`;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+
+            const textMetrics = ctx.measureText(overlayText);
+            const textWidth = textMetrics.width;
+            const textHeight = fontSize;
+            const padding = 10;
+
+            // Draw background rectangle
+            const rectX = 10;
+            const rectY = canvas.height - textHeight - padding * 2 - 10;
+            ctx.fillRect(rectX, rectY, textWidth + padding * 2, textHeight + padding * 2);
+
+            // Draw text
+            ctx.fillStyle = 'white';
+            ctx.fillText(overlayText, rectX + padding, rectY + textHeight + padding);
+
+            // Convert canvas to blob
+            const blob = await new Promise(resolve =>
+                canvas.toBlob(resolve, 'image/jpeg', 0.9)
+            );
+
+            console.log('✅ Photo captured, uploading...');
+            await uploadMedia(blob, CAPTURE_STEPS[currentStep], timestamp);
+
+        } catch (error) {
+            console.error('❌ Photo capture failed:', error);
+            setError('Photo capture failed: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const startVideoRecording = async () => {
-        if (!stream) return;
+        if (!stream) {
+            setError('Camera not available for recording');
+            return;
+        }
 
         try {
-            const mediaRecorder = new MediaRecorder(stream);
+            console.log('🎥 Starting video recording...');
+
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9'
+            });
+
             mediaRecorderRef.current = mediaRecorder;
             const chunks = [];
 
@@ -138,6 +208,7 @@ export default function MediaCapture() {
             };
 
             mediaRecorder.onstop = async () => {
+                console.log('🎥 Video recording stopped, processing...');
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 await uploadMedia(blob, CAPTURE_STEPS[currentStep], new Date());
             };
@@ -146,7 +217,7 @@ export default function MediaCapture() {
             setRecordingTime(0);
             mediaRecorder.start();
 
-            // Auto-stop after 10 seconds
+            // Auto-stop after 10 seconds with countdown
             const timer = setInterval(() => {
                 setRecordingTime(prev => {
                     if (prev >= 9) {
@@ -159,124 +230,184 @@ export default function MediaCapture() {
             }, 1000);
 
         } catch (error) {
-            console.error('Recording failed:', error);
-            alert('Video recording failed. Please try again.');
+            console.error('❌ Video recording failed:', error);
+            setError('Video recording failed: ' + error.message);
         }
     };
 
     const stopVideoRecording = () => {
         if (mediaRecorderRef.current && isRecording) {
+            console.log('⏹️ Stopping video recording...');
             mediaRecorderRef.current.stop();
             setIsRecording(false);
         }
     };
-
     const uploadMedia = async (blob, step, timestamp) => {
-        setLoading(true);
-
         try {
+            console.log(`📤 Uploading ${step.type} for step: ${step.label}`);
+
             const formData = new FormData();
-            formData.append('image', blob, `${step.id}.${step.type === 'photo' ? 'jpg' : 'webm'}`);
+            const filename = `${step.id}.${step.type === 'photo' ? 'jpg' : 'webm'}`;
+            formData.append('image', blob, filename);
             formData.append('lat', coords.lat.toString());
             formData.append('lon', coords.lon.toString());
             formData.append('client_ts', timestamp.getTime().toString());
             formData.append('overlay_text', formatOverlay(timestamp, coords.lat, coords.lon));
             formData.append('parcel_id', documentId);
+            formData.append('media_type', step.type);
+            formData.append('step_id', step.id); // Add step ID for backend
 
-            // Use the backend upload endpoint
+            console.log('📤 Sending upload request...');
             const response = await fetch('http://localhost:5000/api/claims/upload', {
                 method: 'POST',
                 body: formData
             });
 
             const data = await response.json();
+            console.log('📤 Upload response:', data);
 
             if (!response.ok) {
                 throw new Error(data.error || 'Upload failed');
             }
 
-            setCapturedMedia(prev => ({
-                ...prev,
-                [step.id]: {
-                    ...data,
-                    stepInfo: step,
-                    timestamp: timestamp.toISOString()
-                }
-            }));
+            // Store the result - THIS IS CRITICAL
+            setCapturedMedia(prev => {
+                const updated = {
+                    ...prev,
+                    [step.id]: {
+                        ...data,
+                        stepInfo: step,
+                        timestamp: timestamp.toISOString(),
+                        uploadSuccessful: true
+                    }
+                };
 
-            // Store processing result if this was the damaged crop photo
+                console.log('📋 Updated captured media:', Object.keys(updated));
+                return updated;
+            });
+
+            // Store processing result for damaged crop photo (final analysis)
             if (step.id === 'damaged-crop' && data.final) {
+                console.log('💾 Storing final result from damaged crop analysis');
                 setFinalResult(data);
             }
 
-            // Move to next step or complete
-            if (currentStep < CAPTURE_STEPS.length - 1) {
-                setCurrentStep(currentStep + 1);
+            // FIXED: Move to next step or complete - Check current step properly
+            console.log(`📊 Current step: ${currentStep}, Total steps: ${CAPTURE_STEPS.length}`);
+            console.log(`🎯 Current step ID: ${CAPTURE_STEPS[currentStep].id}, Uploaded step ID: ${step.id}`);
+
+            // Make sure we're processing the current step
+            if (CAPTURE_STEPS[currentStep].id === step.id) {
+                if (currentStep < CAPTURE_STEPS.length - 1) {
+                    console.log(`➡️ Moving from step ${currentStep} to ${currentStep + 1}`);
+                    setCurrentStep(prevStep => prevStep + 1);
+                } else {
+                    console.log('✅ All steps completed, completing claim...');
+                    await completeClaim();
+                }
             } else {
-                await completeClaim();
+                console.warn(`⚠️ Step mismatch! Current: ${CAPTURE_STEPS[currentStep].id}, Uploaded: ${step.id}`);
             }
 
         } catch (error) {
-            console.error('Upload failed:', error);
-            alert(`Upload failed: ${error.message}. Please try again.`);
-        } finally {
-            setLoading(false);
+            console.error('❌ Upload failed:', error);
+            setError(`Upload failed: ${error.message}`);
         }
     };
 
-    const completeClaim = async () => {
-        try {
-            // Mock completion - replace with actual API call
-            alert(`Claim submitted successfully! Document ID: ${documentId}`);
-            navigate('/claims');
-        } catch (error) {
-            console.error('Claim completion failed:', error);
-            alert('Failed to complete claim. Please contact support.');
-        }
+
+
+const completeClaim = async () => {
+  try {
+    console.log('🎯 Completing claim with all data...');
+    console.log('📊 Final result:', finalResult);
+    console.log('📁 Captured media:', capturedMedia);
+    console.log('📋 Media keys:', Object.keys(capturedMedia));
+    
+    // Prepare the completion data
+    const completionData = {
+      documentId,
+      media: capturedMedia,
+      processingResult: finalResult,
+      totalSteps: CAPTURE_STEPS.length,
+      completedSteps: Object.keys(capturedMedia).length
     };
+    
+    console.log('📤 Sending completion request...');
+    
+    const response = await fetch('http://localhost:5000/api/claims/complete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(completionData)
+    });
 
-    const downloadPDF = () => {
-        if (!finalResult) return;
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
 
-        const doc = new jsPDF();
-        let y = 20;
+    const data = await response.json();
+    console.log('✅ Completion response:', data);
 
-        doc.setFontSize(18);
-        doc.text("PBI Agriculture Insurance Claim Report", 105, y, { align: "center" });
-        y += 15;
+    if (data.success) {
+      console.log('✅ Claim completed successfully');
+      console.log('🎯 Navigating to results page...');
+      
+      // Navigate to results page
+      navigate(`/claim-results/${documentId}`);
+    } else {
+      throw new Error(data.message || 'Claim completion failed');
+    }
+  } catch (error) {
+    console.error('❌ Claim completion failed:', error);
+    
+    // Check if it's a network error
+    if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
+      console.log('🔄 Endpoint not found, navigating to results anyway...');
+      // Navigate to results even if completion API fails
+      navigate(`/claim-results/${documentId}`);
+    } else {
+      setError('Failed to complete claim: ' + error.message);
+    }
+  }
+};
 
-        doc.setFontSize(12);
-        doc.text(`Document ID: ${documentId}`, 14, y); y += 8;
-        doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y); y += 8;
-        doc.text(`Coordinates: ${coords?.lat.toFixed(6)}, ${coords?.lon.toFixed(6)}`, 14, y); y += 12;
 
-        doc.setFontSize(14);
-        doc.text("Assessment Results:", 14, y); y += 8;
 
-        doc.setFontSize(12);
-        doc.text(`Risk Level: ${finalResult?.final?.risk ?? "N/A"}`, 14, y); y += 6;
-        doc.text(`Verification: ${finalResult?.final?.verification_level ?? "N/A"}`, 14, y); y += 6;
-        doc.text(`Physical Check: ${finalResult?.final?.need_physical_check ? "Required" : "Not Required"}`, 14, y); y += 6;
-        doc.text(`Damage: ${((finalResult?.phases?.damage_pct ?? 0) * 100).toFixed(2)}%`, 14, y); y += 12;
-
-        doc.text("Captured Evidence:", 14, y); y += 8;
-        Object.keys(capturedMedia).forEach(stepId => {
-            const step = CAPTURE_STEPS.find(s => s.id === stepId);
-            if (step) {
-                doc.text(`✓ ${step.label}`, 20, y); y += 6;
-            }
-        });
-
-        doc.save(`claim_report_${documentId}.pdf`);
-    };
 
     const currentStepData = CAPTURE_STEPS[currentStep];
     const progress = ((currentStep + (Object.keys(capturedMedia).length > currentStep ? 1 : 0)) / CAPTURE_STEPS.length) * 100;
 
+    if (error) {
+        return (
+            <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <h2>❌ Error</h2>
+                <p style={{ color: 'red', marginBottom: '2rem' }}>{error}</p>
+                <button
+                    onClick={() => window.location.reload()}
+                    style={{
+                        padding: '1rem 2rem',
+                        background: '#4CAF50',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer'
+                    }}
+                >
+                    🔄 Retry
+                </button>
+            </div>
+        );
+    }
+
     return (
         <div style={{ padding: '1rem', maxWidth: '800px', margin: '0 auto' }}>
+            {/* Header */}
             <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
-                <h2>📸 Capture Evidence</h2>
+                <h2>📸 Capture Evidence - Step {currentStep + 1} of {CAPTURE_STEPS.length}</h2>
+
+                {/* Progress Bar */}
                 <div style={{
                     width: '100%',
                     height: '8px',
@@ -292,9 +423,9 @@ export default function MediaCapture() {
                         transition: 'width 0.3s ease'
                     }}></div>
                 </div>
-                <p>Step {currentStep + 1} of {CAPTURE_STEPS.length}</p>
             </div>
 
+            {/* Current Step */}
             <div style={{
                 background: 'white',
                 padding: '1.5rem',
@@ -302,7 +433,9 @@ export default function MediaCapture() {
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 marginBottom: '2rem'
             }}>
-                <h3 style={{ marginBottom: '0.5rem' }}>{currentStepData.icon} {currentStepData.label}</h3>
+                <h3 style={{ marginBottom: '0.5rem' }}>
+                    {currentStepData.icon} {currentStepData.label}
+                </h3>
                 <p style={{ color: '#666', marginBottom: '1rem' }}>
                     {currentStepData.type === 'video'
                         ? 'Record a 10-second video showing overall farm condition'
@@ -310,20 +443,26 @@ export default function MediaCapture() {
                     }
                 </p>
 
+                {/* Video Preview */}
                 <div style={{ position: 'relative', marginBottom: '1rem' }}>
                     <video
                         ref={videoRef}
                         autoPlay
                         playsInline
+                        muted
                         style={{
                             width: '100%',
                             maxWidth: '600px',
                             borderRadius: '12px',
                             backgroundColor: '#f0f0f0'
                         }}
+                        onLoadedMetadata={() => console.log('📹 Video loaded')}
                     />
+
+                    {/* Hidden canvas for photo capture */}
                     <canvas ref={canvasRef} style={{ display: 'none' }} />
 
+                    {/* Location overlay */}
                     {coords && (
                         <div style={{
                             position: 'absolute',
@@ -338,6 +477,7 @@ export default function MediaCapture() {
                         </div>
                     )}
 
+                    {/* Recording indicator */}
                     {isRecording && (
                         <div style={{
                             position: 'absolute',
@@ -355,19 +495,20 @@ export default function MediaCapture() {
                     )}
                 </div>
 
+                {/* Capture Button */}
                 <div style={{ textAlign: 'center' }}>
                     {currentStepData.type === 'photo' ? (
                         <button
                             onClick={capturePhoto}
-                            disabled={loading || !coords}
+                            disabled={loading || !coords || !stream}
                             style={{
                                 padding: '1rem 2rem',
                                 fontSize: '1.1rem',
-                                background: loading || !coords ? '#ccc' : '#4CAF50',
+                                background: loading || !coords || !stream ? '#ccc' : '#4CAF50',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '12px',
-                                cursor: loading || !coords ? 'not-allowed' : 'pointer',
+                                cursor: loading || !coords || !stream ? 'not-allowed' : 'pointer',
                                 transition: 'all 0.3s'
                             }}
                         >
@@ -376,33 +517,33 @@ export default function MediaCapture() {
                     ) : (
                         <button
                             onClick={isRecording ? stopVideoRecording : startVideoRecording}
-                            disabled={loading || !coords}
+                            disabled={loading || !coords || !stream}
                             style={{
                                 padding: '1rem 2rem',
                                 fontSize: '1.1rem',
-                                background: isRecording ? '#f44336' : (loading || !coords ? '#ccc' : '#4CAF50'),
+                                background: isRecording ? '#f44336' : (loading || !coords || !stream ? '#ccc' : '#4CAF50'),
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '12px',
-                                cursor: loading || !coords ? 'not-allowed' : 'pointer',
+                                cursor: loading || !coords || !stream ? 'not-allowed' : 'pointer',
                                 transition: 'all 0.3s'
                             }}
                         >
-                            {isRecording ? `🔴 Stop Recording (${recordingTime}s)` : '🎥 Start Recording'}
+                            {isRecording ? `🔴 Stop (${10 - recordingTime}s)` : '🎥 Start Recording'}
                         </button>
                     )}
                 </div>
             </div>
 
+            {/* Progress Summary */}
             {Object.keys(capturedMedia).length > 0 && (
                 <div style={{
                     background: 'white',
                     padding: '1.5rem',
                     borderRadius: '12px',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-                    marginBottom: '2rem'
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
                 }}>
-                    <h4 style={{ marginBottom: '1rem' }}>📋 Captured Evidence:</h4>
+                    <h4 style={{ marginBottom: '1rem' }}>📋 Completed Steps:</h4>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                         {Object.keys(capturedMedia).map(stepId => {
                             const step = CAPTURE_STEPS.find(s => s.id === stepId);
@@ -420,53 +561,6 @@ export default function MediaCapture() {
                                 </div>
                             );
                         })}
-                    </div>
-                </div>
-            )}
-
-            {finalResult && (
-                <div style={{
-                    background: 'white',
-                    padding: '1.5rem',
-                    borderRadius: '12px',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
-                }}>
-                    <h4 style={{ marginBottom: '1rem', color: '#4CAF50' }}>✅ Processing Complete!</h4>
-
-                    <div style={{ marginBottom: '1rem' }}>
-                        <p><strong>Risk Level:</strong> {finalResult?.final?.risk}</p>
-                        <p><strong>Verification:</strong> {finalResult?.final?.verification_level}</p>
-                        <p><strong>Estimated Damage:</strong> {((finalResult?.phases?.damage_pct ?? 0) * 100).toFixed(2)}%</p>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button
-                            onClick={downloadPDF}
-                            style={{
-                                padding: '0.75rem 1.5rem',
-                                background: '#2196F3',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '8px',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            📄 Download Report
-                        </button>
-
-                        <button
-                            onClick={() => navigate('/claims')}
-                            style={{
-                                padding: '0.75rem 1.5rem',
-                                background: '#4CAF50',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '8px',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            📋 View Claims
-                        </button>
                     </div>
                 </div>
             )}

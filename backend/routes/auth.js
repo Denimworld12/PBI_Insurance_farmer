@@ -1,7 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User.model.js'); // FIXED PATH
-const { sendSMS } = require('../utils/smsService');
+const User = require('../models/User.js'); // FIXED PATH
+const { sendSMS } = require('../utils/smsService.js');
 const router = express.Router();
 
 // Send OTP for login

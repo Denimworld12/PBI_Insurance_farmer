@@ -1,8 +1,8 @@
 
 const express = require('express');
-const Claim = require('../models/Claims.model.js');
-const Insurance = require('../models/Insurance.model.js');
-const auth = require('../middleware/auth.middleware.js');
+const Claim = require('./Claims.js');
+const Insurance = require('./Insurance.js');
+const auth = require('../middleware/auth.js');
 const router = express.Router();
 
 /**

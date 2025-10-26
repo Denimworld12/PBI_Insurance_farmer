@@ -1,0 +1,931 @@
+/* Dashboard Page Container */
+.dashboard-page {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 2rem 1rem;
+}
+
+.dashboard-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+}
+
+/* Hero Section - F-pattern: Top-left text, top-right image */
+.hero-section {
+    background: linear-gradient(135deg, #166534 0%, #16a34a 100%);
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.hero-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+}
+
+.hero-text {
+    color: white;
+}
+
+.hero-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: #f3f4f6;
+}
+
+.hero-description {
+    font-size: 1.125rem;
+    line-height: 1.7;
+    margin: 0 0 1.5rem 0;
+    opacity: 0.95;
+    color: rgb(207, 207, 207);
+}
+
+.hero-user {
+    font-size: 0.95rem;
+    opacity: 0.85;
+    margin: 0;
+}
+
+.hero-image {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.hero-img {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: cover;
+}
+
+/* Action Buttons */
+.action-buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.action-btn {
+    padding: 1.25rem 1.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 200ms ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transform-style: preserve-3d;
+}
+
+.action-btn-primary {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+    color: white;
+    box-shadow: 0 8px 20px rgba(29, 78, 216, 0.18);
+}
+
+.action-btn-primary:hover {
+    transform: perspective(900px) rotateX(3deg) rotateY(-3deg) translateY(-2px);
+    box-shadow: 0 12px 28px rgba(29, 78, 216, 0.28);
+}
+
+.action-btn-success {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: white;
+    box-shadow: 0 8px 20px rgba(22, 163, 74, 0.18);
+}
+
+.action-btn-success:hover {
+    transform: perspective(900px) rotateX(3deg) rotateY(3deg) translateY(-2px);
+    box-shadow: 0 12px 28px rgba(22, 163, 74, 0.28);
+}
+
+/* Section Titles */
+.section-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 0.5rem 0;
+    text-align: center;
+}
+
+.section-subtitle {
+    font-size: 1.125rem;
+    color: #6b7280;
+    text-align: center;
+    margin: 0 0 2rem 0;
+}
+
+/* How It Works Section */
+.how-it-works-section {
+    background: white;
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.how-it-works-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+}
+
+.how-card {
+    text-align: center;
+    padding: 2rem 1.5rem;
+    background: #f9fafb;
+    border-radius: 16px;
+    border: 1px solid #e5e7eb;
+    transition: all 200ms ease;
+}
+
+.how-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+    border-color: #c7d2fe;
+}
+
+.how-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 1.5rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.how-icon img {
+    width: 48px;
+    height: 48px;
+}
+
+.how-card-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 0.75rem 0;
+}
+
+.how-card-text {
+    font-size: 0.95rem;
+    color: #4b5563;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Features Section - Z-pattern: Image left, list right */
+.features-section {
+    background: white;
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.features-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+    margin-top: 2rem;
+}
+
+.comparison-visual {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+}
+
+.comparison-img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.features-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.feature-item {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.feature-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.feature-icon-reduce {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+}
+
+.feature-icon-speed {
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+}
+
+.feature-icon-trust {
+    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+}
+
+.feature-content {
+    flex: 1;
+}
+
+.feature-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 0.5rem 0;
+}
+
+.feature-text {
+    font-size: 0.95rem;
+    color: #4b5563;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Stats Section */
+.stats-section {
+    background: linear-gradient(135deg, #1e3a8a, #1e40af);
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.stats-section .section-title {
+    color: white;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+.stat-card {
+    text-align: center;
+    padding: 2rem 1.5rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(8px);
+    transition: all 200ms ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.stat-number {
+    font-size: 3rem;
+    font-weight: 700;
+    color: white;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+}
+
+.stat-label {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 0.5rem;
+}
+
+.stat-desc {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.4;
+}
+
+/* Trust Section - F-pattern: Text left, visual right */
+.trust-section {
+    background: white;
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.trust-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+}
+
+.trust-description {
+    font-size: 1rem;
+    color: #4b5563;
+    line-height: 1.7;
+    margin: 0 0 1.5rem 0;
+    text-align: left;
+}
+
+.trust-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    text-align: left;
+}
+
+.trust-list-item {
+    padding-left: 1.75rem;
+    position: relative;
+    font-size: 0.95rem;
+    color: #374151;
+    line-height: 1.6;
+}
+
+.trust-list-item::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.trust-visual {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+}
+
+.trust-img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Insurance Section */
+.insurance-section {
+    background: white;
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.insurance-search {
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto 2rem;
+    padding: 1rem 1.25rem;
+    font-size: 1rem;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    outline: none;
+    transition: all 200ms ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    display: block;
+}
+
+.insurance-search:focus {
+    border-color: #16a34a;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+}
+
+.error-banner {
+    background: #ffebee;
+    color: #b91c1c;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    text-align: center;
+    border: 1px solid #fecdd3;
+}
+
+.error-text {
+    margin: 0 0 1rem 0;
+    font-weight: 500;
+}
+
+.btn-retry {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 200ms ease;
+}
+
+.btn-retry:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(22, 163, 74, 0.25);
+}
+
+.loading-container {
+    text-align: center;
+    padding: 3rem 2rem;
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f4f6;
+    border-top: 5px solid #16a34a;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-text {
+    color: #6b7280;
+    font-size: 1rem;
+}
+
+.insurance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.5rem;
+}
+
+.insurance-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 250ms ease;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+}
+
+.insurance-card:hover {
+    transform: translateY(-6px);
+    border-color: #c7d2fe;
+    box-shadow: 0 16px 34px rgba(99, 102, 241, 0.18);
+}
+
+.insurance-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.insurance-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+    letter-spacing: -0.01em;
+    flex: 1;
+}
+
+.insurance-badge {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.insurance-badge-crop {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.insurance-badge-livestock {
+    background: #eef2ff;
+    color: #3730a3;
+}
+
+.insurance-description {
+    color: #4b5563;
+    margin-bottom: 1.25rem;
+    line-height: 1.6;
+    font-size: 0.95rem;
+}
+
+.insurance-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.25rem;
+    color: #6b7280;
+    font-size: 0.875rem;
+}
+
+.insurance-select-btn {
+    width: 100%;
+    padding: 0.9rem;
+    background: linear-gradient(135deg, #111827, #000);
+    color: white;
+    border: 1px solid #111827;
+    border-radius: 10px;
+    font-size: 0.98rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 200ms ease;
+}
+
+.insurance-select-btn:hover {
+    background: linear-gradient(135deg, #000, #111827);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+    background: white;
+    border-radius: 16px;
+    border: 1px dashed #d1d5db;
+}
+
+.empty-title {
+    font-size: 1.25rem;
+    color: #111827;
+    margin: 0 0 1rem 0;
+}
+
+.empty-text {
+    color: #6b7280;
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.btn-clear {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #111827, #000);
+    color: white;
+    border: 1px solid #111827;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* CTA Section - Z-pattern: Text left, preview right */
+.cta-section {
+    background: linear-gradient(135deg, #166534 0%, #16a34a 100%);
+    border-radius: 20px;
+    padding: 3rem 2rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.cta-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+}
+
+.cta-text {
+    color: white;
+}
+
+.cta-title {
+    font-size: 2.25rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+    line-height: 1.2;
+}
+
+.cta-description {
+    font-size: 1.125rem;
+    line-height: 1.7;
+    margin: 0 0 2rem 0;
+    opacity: 0.95;
+}
+
+.cta-btn {
+    padding: 1.25rem 2rem;
+    background: white;
+    color: #166534;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 200ms ease;
+    transform-style: preserve-3d;
+}
+
+.cta-btn:hover {
+    transform: perspective(900px) rotateX(3deg) rotateY(-3deg) translateY(-2px);
+    box-shadow: 0 12px 28px rgba(255, 255, 255, 0.3);
+}
+
+.cta-preview {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.cta-preview-img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+
+    .hero-content,
+    .features-comparison,
+    .trust-content,
+    .cta-content {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+
+    .hero-title,
+    .cta-title {
+        font-size: 2rem;
+    }
+
+    .section-title {
+        font-size: 1.75rem;
+    }
+
+    .action-buttons-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .insurance-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .dashboard-page {
+        padding: 1rem 0.5rem;
+    }
+
+    .hero-section,
+    .how-it-works-section,
+    .features-section,
+    .stats-section,
+    .trust-section,
+    .insurance-section,
+    .cta-section {
+        padding: 2rem 1.5rem;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+
+/* search button  */
+.insurance-search-wrapper {
+    position: relative;
+    max-width: 520px;
+    margin: 0 auto 2rem;
+}
+
+.insurance-search-wrapper .search-icon {
+    position: absolute;
+    top: 50%;
+    left: 1rem;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    color: #6b7280;
+    /* gray from your palette */
+    pointer-events: none;
+}
+
+.insurance-search {
+    width: 100%;
+    padding: 1rem 1.25rem 1rem 3rem;
+    /* extra left padding for icon */
+    font-size: 1rem;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    outline: none;
+    transition: all 200ms ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    display: block;
+}
+
+.insurance-search:focus {
+    border-color: #16a34a;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+}
+
+/* Insurance Cards - Visual Pop & Interactivity */
+.insurance-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 1.75rem 1.5rem;
+  cursor: pointer;
+  transition: all 300ms ease;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.insurance-card:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  border-color: #c7d2fe; /* subtle blue border pop */
+}
+
+/* Insurance Header */
+.insurance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.insurance-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+  letter-spacing: -0.02em;
+  flex: 1;
+}
+
+.insurance-badge {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 200ms ease;
+}
+
+.insurance-badge-crop {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.insurance-badge-livestock {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+/* Description & Meta */
+.insurance-description {
+  color: #374151;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+
+.insurance-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-bottom: 1.5rem;
+}
+
+/* Select Button - Eye-catching */
+.insurance-select-btn {
+  width: 100%;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 250ms ease;
+  box-shadow: 0 6px 18px rgba(22, 163, 74, 0.25);
+}
+
+.insurance-select-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 28px rgba(22, 163, 74, 0.4);
+  background: linear-gradient(135deg, #15803d, #16a34a);
+}
+
+/* Empty / Retry Buttons */
+.btn-clear, .btn-retry {
+  padding: 0.85rem 1.75rem;
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 250ms ease;
+  box-shadow: 0 6px 18px rgba(29, 78, 216, 0.25);
+}
+
+.btn-clear:hover, .btn-retry:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 12px 28px rgba(29, 78, 216, 0.4);
+}
+
+/* Loading Spinner Enhancement */
+.loading-spinner {
+  width: 60px;
+  height: 60px;
+  border: 6px solid #f3f4f6;
+  border-top: 6px solid #16a34a;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1.5rem;
+}
+.insurance-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.government-emblem {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.government-emblem:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Highlight cards with government certification */
+.insurance-card.government-certified {
+  border: 2px solid #16a34a; /* your green palette */
+  box-shadow: 0 12px 30px rgba(22, 163, 74, 0.15);
+}
+.insurance-name-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; /* space between emblem and text */
+}
+
+.government-emblem {
+  width: 50px; /* smaller size */
+  height: 50px;
+  object-fit: contain;
+  border-radius: 90%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.government-emblem:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}

@@ -1,0 +1,535 @@
+{
+    "test_cases": [
+        {
+            "test_id": "TEST_01_PERFECT_CLAIM",
+            "description": "Perfect legitimate claim - should APPROVE",
+            "expected_decision": "APPROVE",
+            "expected_confidence": ">0.75",
+            "claim_id": "CLAIM_TEST_001",
+            "farmer_data": {
+                "farmer_id": "FARM_001",
+                "insurance_policy_number": "POLICY_001",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": []
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 55
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2347,
+                                72.8570
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2348,
+                                72.8571
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_02_HIGH_FRAUD_RISK",
+            "description": "High fraud risk - GPS outside boundary, high claim history",
+            "expected_decision": "REJECT",
+            "expected_confidence": "<0.50",
+            "claim_id": "CLAIM_TEST_002",
+            "farmer_data": {
+                "farmer_id": "FARM_002",
+                "insurance_policy_number": "POLICY_002",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": [
+                        1,
+                        2,
+                        3,
+                        4
+                    ]
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 90
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.9999,
+                                72.9999
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.9998,
+                                72.9998
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_03_MEDIUM_CONFIDENCE",
+            "description": "Medium confidence - requires manual review",
+            "expected_decision": "MANUAL_REVIEW",
+            "expected_confidence": "0.50-0.75",
+            "claim_id": "CLAIM_TEST_003",
+            "farmer_data": {
+                "farmer_id": "FARM_003",
+                "insurance_policy_number": "POLICY_003",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": []
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 70
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2347,
+                                72.8570
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_04_EXAGGERATED_CLAIM",
+            "description": "Farmer claiming much more damage than calculated",
+            "expected_decision": "MANUAL_REVIEW",
+            "expected_confidence": "0.50-0.75",
+            "claim_id": "CLAIM_TEST_004",
+            "farmer_data": {
+                "farmer_id": "FARM_004",
+                "insurance_policy_number": "POLICY_004",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": []
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 85
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2347,
+                                72.8570
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2348,
+                                72.8571
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_05_LOW_DAMAGE_CLAIM",
+            "description": "Low damage claim - minimal damage detected",
+            "expected_decision": "APPROVE",
+            "expected_confidence": ">0.75",
+            "claim_id": "CLAIM_TEST_005",
+            "farmer_data": {
+                "farmer_id": "FARM_005",
+                "insurance_policy_number": "POLICY_005",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": []
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 15
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2347,
+                                72.8570
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2348,
+                                72.8571
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_06_REPEAT_OFFENDER",
+            "description": "Farmer with multiple previous claims",
+            "expected_decision": "MANUAL_REVIEW",
+            "expected_confidence": "0.50-0.75",
+            "claim_id": "CLAIM_TEST_006",
+            "farmer_data": {
+                "farmer_id": "FARM_006",
+                "insurance_policy_number": "POLICY_006",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": [
+                        "CLAIM_2023_001",
+                        "CLAIM_2023_002",
+                        "CLAIM_2024_001",
+                        "CLAIM_2024_002"
+                    ]
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 50
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2347,
+                                72.8570
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2348,
+                                72.8571
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "test_id": "TEST_07_EDGE_CASE_BOUNDARY",
+            "description": "GPS coordinates at edge of farm boundary",
+            "expected_decision": "APPROVE",
+            "expected_confidence": ">0.70",
+            "claim_id": "CLAIM_TEST_007",
+            "farmer_data": {
+                "farmer_id": "FARM_007",
+                "insurance_policy_number": "POLICY_007",
+                "farm_location": {
+                    "registered_coordinates": [
+                        [
+                            72.8567,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2345
+                        ],
+                        [
+                            72.8577,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2355
+                        ],
+                        [
+                            72.8567,
+                            19.2345
+                        ]
+                    ],
+                    "total_area_hectares": 2.5
+                },
+                "crop_details": {
+                    "crop_type": "Cotton"
+                },
+                "insurance_details": {
+                    "sum_insured": 125000
+                },
+                "historical_data": {
+                    "previous_claim_history": []
+                }
+            },
+            "claim_data": {
+                "claim_date": "2024-09-30T10:30:00Z",
+                "claim_reason": "pest_attack",
+                "estimated_damage_percent": 48
+            },
+            "media_uploads": {
+                "images": [
+                    {
+                        "image_id": "IMG_001",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2345,
+                                72.8567
+                            ],
+                            "timestamp": 1727692200000
+                        }
+                    },
+                    {
+                        "image_id": "IMG_002",
+                        "file_path": "test_images/good_quality_damaged_crop.jpg",
+                        "capture_metadata": {
+                            "gps_coordinates": [
+                                19.2355,
+                                72.8577
+                            ],
+                            "timestamp": 1727692220000
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

@@ -450,6 +450,7 @@ const upload = multer({
     }
 });
 
+// Replace your upload endpoint with this real-data version
 app.post("/api/claims/upload", upload.single("image"), async (req, res) => {
     try {
         if (!req.file) {
@@ -462,127 +463,128 @@ app.post("/api/claims/upload", upload.single("image"), async (req, res) => {
         const overlayText = req.body.overlay_text || "";
         const clientTs = Number(req.body.client_ts) || Date.now();
         const parcelId = req.body.parcel_id || "DEFAULT_PARCEL";
-        const mediaType = req.body.media_type || 'photo';
         const stepId = req.body.step_id || 'unknown';
 
-        console.log(`📤 Processing ${mediaType} upload:`, req.file.originalname);
+        console.log(`📤 Processing real data extraction for: ${req.file.originalname}`);
         console.log(`📍 Coordinates: ${lat}, ${lon} | Step: ${stepId}`);
 
-        // Validate coordinates
         if (isNaN(lat) || isNaN(lon)) {
             return res.status(400).json({ error: 'Invalid coordinates provided' });
         }
 
-        // Initialize claim data if not exists
+        // Initialize claim data storage
         if (!claimResults.has(parcelId)) {
             claimResults.set(parcelId, {
                 documentId: parcelId,
                 individual_results: {},
-                metadata: { timestamp: new Date().toISOString() }
+                metadata: { 
+                    timestamp: new Date().toISOString(),
+                    processing_mode: 'real_data_only'
+                }
             });
         }
 
-        // Handle video files differently
-        if (mediaType === 'video' || req.file.mimetype.startsWith('video/')) {
+        // Handle video files (basic info only)
+        if (req.file.mimetype.startsWith('video/')) {
             console.log('🎥 Processing video file...');
-
+            
             const videoResult = {
-                final: {
-                    risk: 'low',
-                    verification_level: 'auto-approve',
-                    need_physical_check: false
+                processing_info: {
+                    timestamp: Date.now(),
+                    processing_time_ms: 500,
+                    version: '3.0-real-data-only'
                 },
-                phases: {
-                    video_analysis: {
-                        duration_seconds: 10,
-                        quality_score: 0.85,
-                        motion_detected: true,
-                        farm_coverage: 'adequate',
-                        lighting_quality: 'good'
-                    },
-                    geo_match: true,
-                    timestamp_valid: true
-                },
-                metadata: {
-                    uploadedFile: req.file.originalname,
-                    fileSize: req.file.size,
+                input_data: {
+                    file_name: req.file.originalname,
+                    file_size: req.file.size,
                     coordinates: { lat, lon },
-                    timestamp: new Date(clientTs).toISOString(),
-                    processingTime: 1500,
-                    mode: 'video_analysis',
-                    mediaType: 'video',
-                    stepId
+                    step_id: stepId
+                },
+                extracted_data: {
+                    media_type: 'video',
+                    duration_estimated: '10 seconds',
+                    file_format: req.file.mimetype
+                },
+                confidence_assessment: {
+                    overall_confidence: 0.7,
+                    recommendation: {
+                        status: 'manual_review',
+                        reason: 'Video analysis requires manual verification',
+                        action: 'Human review recommended'
+                    }
                 }
             };
 
-            // Store individual result
             const claimData = claimResults.get(parcelId);
             claimData.individual_results[stepId] = videoResult;
-
-            // If this is the final step, generate aggregated analysis
-            if (Object.keys(claimData.individual_results).length >= 6) {
-                claimData.aggregated_analysis = generateAggregatedAnalysis(claimData.individual_results);
-                console.log('🎯 Generated aggregated analysis for claim:', parcelId);
-            }
-
             claimResults.set(parcelId, claimData);
-            fs.unlink(filePath, () => { });
+
+            fs.unlink(filePath, () => {});
             return res.json(videoResult);
         }
 
-        // For photos, continue with enhanced processing
-        console.log('📸 Processing photo file...');
-
-        // Ensure cadastral data exists
+        // Ensure cadastral data exists for geofencing
         const cadastralPath = path.join(__dirname, "data", "parcel.geojson");
         if (!fs.existsSync(cadastralPath)) {
-            const sampleParcel = {
+            const testBoundary = {
                 "type": "FeatureCollection",
                 "features": [{
                     "type": "Feature",
                     "properties": {
                         "parcel_id": parcelId,
-                        "owner": "Sample Farmer",
-                        "area": 5.5,
-                        "crop_type": "Rice",
-                        "district": "Sample District",
-                        "state": "Maharashtra"
+                        "note": "Generated test boundary for geofencing analysis"
                     },
                     "geometry": {
                         "type": "Polygon",
-                        "coordinates": [[[lon - 0.005, lat - 0.005], [lon + 0.005, lat - 0.005], [lon + 0.005, lat + 0.005], [lon - 0.005, lat + 0.005], [lon - 0.005, lat - 0.005]]]
+                        "coordinates": [[[lon-0.003, lat-0.003], [lon+0.003, lat-0.003], [lon+0.003, lat+0.003], [lon-0.003, lat+0.003], [lon-0.003, lat-0.003]]]
                     }
                 }]
             };
-            fs.writeFileSync(cadastralPath, JSON.stringify(sampleParcel, null, 2));
-            console.log('✅ Created sample parcel data for:', parcelId);
+            fs.writeFileSync(cadastralPath, JSON.stringify(testBoundary, null, 2));
         }
 
-        // Check if Python worker exists
+        // Check for Python worker
         const workerPath = path.join(__dirname, "../worker/pipeline.py");
         if (!fs.existsSync(workerPath)) {
-            console.log(`⚠️ Python worker not found at: ${workerPath}`);
+            console.log(`⚠️ Python worker not found, using basic analysis`);
+            
+            const basicResult = {
+                processing_info: {
+                    timestamp: Date.now(),
+                    processing_time_ms: 1000,
+                    version: '3.0-basic-fallback',
+                    note: 'Python worker unavailable'
+                },
+                input_data: {
+                    file_name: req.file.originalname,
+                    file_size: req.file.size,
+                    coordinates: { lat, lon },
+                    step_id: stepId
+                },
+                extracted_exif_data: {
+                    available: false,
+                    error: 'Python EXIF extraction unavailable'
+                },
+                confidence_assessment: {
+                    overall_confidence: 0.3,
+                    recommendation: {
+                        status: 'additional_evidence',
+                        reason: 'Unable to extract EXIF data for verification',
+                        action: 'Request manual verification'
+                    }
+                }
+            };
 
-            // Generate enhanced mock result
-            const mockResult = generateEnhancedMockResult(req.file, lat, lon, clientTs, stepId);
-
-            // Store individual result
             const claimData = claimResults.get(parcelId);
-            claimData.individual_results[stepId] = mockResult;
-
-            // Check if this is final critical step and generate aggregated analysis
-            if (stepId === 'damaged-crop' || Object.keys(claimData.individual_results).length >= 5) {
-                claimData.aggregated_analysis = generateAggregatedAnalysis(claimData.individual_results);
-                console.log('🎯 Generated aggregated analysis for claim:', parcelId);
-            }
-
+            claimData.individual_results[stepId] = basicResult;
             claimResults.set(parcelId, claimData);
-            fs.unlink(filePath, () => { });
-            return res.json(mockResult);
+
+            fs.unlink(filePath, () => {});
+            return res.json(basicResult);
         }
 
-        // ★ Run actual Python pipeline
-        console.log('🐍 Starting enhanced Python pipeline...');
+        // Run Python pipeline for real data extraction
+        console.log('🐍 Starting real data extraction pipeline...');
         const py = spawn("python", [
             workerPath,
             filePath,
@@ -594,159 +596,174 @@ app.post("/api/claims/upload", upload.single("image"), async (req, res) => {
             parcelId
         ], {
             cwd: process.cwd(),
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            stdio: ['pipe', 'pipe', 'pipe']
         });
 
-        let out = "";
-        let err = "";
+        let stdout = "";
+        let stderr = "";
 
         py.stdout.on("data", (data) => {
-            out += data.toString();
+            stdout += data.toString();
         });
 
         py.stderr.on("data", (data) => {
             const errorMsg = data.toString();
-            console.log("PYTHON STDERR:", errorMsg);
-            err += errorMsg;
+            console.log("PYTHON LOG:", errorMsg);
+            stderr += errorMsg;
         });
 
         py.on("close", (code) => {
             try {
                 if (code !== 0) {
-                    throw new Error(`Pipeline failed with code ${code}: ${err}`);
+                    throw new Error(`Python pipeline failed with code ${code}: ${stderr}`);
                 }
 
                 let result;
                 try {
-                    result = JSON.parse(out);
-                    console.log('✅ Python pipeline completed successfully for step:', stepId);
+                    result = JSON.parse(stdout);
+                    console.log('✅ Real data extraction completed for step:', stepId);
                 } catch (parseError) {
-                    throw new Error(`Failed to parse pipeline output: ${parseError.message}\nOutput: ${out}`);
+                    throw new Error(`Failed to parse Python output: ${parseError.message}`);
                 }
 
-                // Enhance result with additional metadata
-                result.metadata = {
-                    ...result.metadata,
-                    uploadedFile: req.file.originalname,
-                    fileSize: req.file.size,
-                    coordinates: { lat, lon },
-                    timestamp: new Date(clientTs).toISOString(),
-                    processingTime: Date.now() - clientTs,
-                    mediaType: 'photo',
-                    stepId
+                // Add metadata
+                result.input_data = {
+                    ...result.input_data,
+                    uploaded_file: req.file.originalname,
+                    file_size_bytes: req.file.size,
+                    step_id: stepId
                 };
 
-                // ★ Store individual result
+                // Store individual result
                 const claimData = claimResults.get(parcelId);
                 claimData.individual_results[stepId] = result;
 
-                // Check if this is final step and generate aggregated analysis
-                if (stepId === 'damaged-crop' || Object.keys(claimData.individual_results).length >= 5) {
-                    claimData.aggregated_analysis = generateAggregatedAnalysis(claimData.individual_results);
-                    console.log('🎯 Generated real aggregated analysis for claim:', parcelId);
+                // Generate aggregated analysis when we have enough data
+                if (Object.keys(claimData.individual_results).length >= 5) {
+                    claimData.aggregated_analysis = generateRealAggregatedAnalysis(claimData.individual_results);
+                    console.log('🎯 Generated real aggregated analysis for:', parcelId);
                 }
 
                 claimResults.set(parcelId, claimData);
                 res.json(result);
 
             } catch (error) {
-                console.error('Pipeline processing error:', error);
+                console.error('Real data extraction error:', error);
+                
+                const errorResult = {
+                    processing_info: {
+                        timestamp: Date.now(),
+                        version: '3.0-error-fallback'
+                    },
+                    input_data: {
+                        uploaded_file: req.file.originalname,
+                        step_id: stepId,
+                        error: error.message
+                    },
+                    confidence_assessment: {
+                        overall_confidence: 0.1,
+                        recommendation: {
+                            status: 'reject',
+                            reason: 'Processing failed',
+                            action: 'Technical investigation required'
+                        }
+                    }
+                };
 
-                const fallbackResult = generateFallbackResult(req.file, lat, lon, clientTs, stepId, error);
-
-                // Store fallback result
                 const claimData = claimResults.get(parcelId);
-                claimData.individual_results[stepId] = fallbackResult;
+                claimData.individual_results[stepId] = errorResult;
                 claimResults.set(parcelId, claimData);
 
-                res.json(fallbackResult);
+                res.json(errorResult);
             } finally {
-                fs.unlink(filePath, (unlinkError) => {
-                    if (unlinkError) {
-                        console.error('Failed to delete temp file:', unlinkError);
-                    }
-                });
+                fs.unlink(filePath, () => {});
             }
         });
 
-        py.on('error', (error) => {
-            console.error('Failed to start Python process:', error);
-
-            const fallbackResult = generateFallbackResult(req.file, lat, lon, clientTs, stepId, error);
-
-            const claimData = claimResults.get(parcelId);
-            claimData.individual_results[stepId] = fallbackResult;
-            claimResults.set(parcelId, claimData);
-
-            res.json(fallbackResult);
-        });
-
-        // Set timeout for the process
-        const timeout = setTimeout(() => {
-            py.kill('SIGKILL');
-            console.log('⏰ Python process timed out for step:', stepId);
-
-            const timeoutResult = generateTimeoutResult(req.file, lat, lon, clientTs, stepId);
-
-            const claimData = claimResults.get(parcelId);
-            claimData.individual_results[stepId] = timeoutResult;
-            claimResults.set(parcelId, claimData);
-
-            res.json(timeoutResult);
-        }, 60000);
-
-        py.on('close', () => {
-            clearTimeout(timeout);
-        });
-
     } catch (error) {
-        console.error('Upload endpoint error:', error);
+        console.error('Upload processing error:', error);
         res.status(500).json({
-            error: 'Internal server error',
+            error: 'Server error during processing',
             details: error.message
         });
     }
 });
 
-// ==================== HELPER FUNCTIONS ====================
-
-function generateMockAggregatedResult() {
-    const damagePercentage = Math.random() * 0.6;
-    return {
-        final: {
-            risk: damagePercentage > 0.4 ? 'medium' : 'low',
-            verification_level: damagePercentage > 0.5 ? 'manual-review' : 'auto-approve',
-            need_physical_check: damagePercentage > 0.3,
-            reasons: ['Weather verified', 'Location confirmed', 'Damage assessed'],
-            confidence_score: 0.75 + Math.random() * 0.2
-        },
-        phases: {
-            meta_validation: { valid: true, exif_available: true, coordinates_match: true },
-            geofencing: { location_valid: true, parcel_properties: { crop_type: 'Rice', area: 5.5 } },
-            forensics: { tampering_detected: false, overlay_consistent: true },
-            weather_correlation: {
-                weather_data: {
-                    temperature_avg: 28.5, precipitation: 2.3, conditions: 'partly_cloudy',
-                    source: 'meteostat_rapidapi', api_success: true
-                },
-                consistency_analysis: { inconsistent: false, score: 0.9, verifiable: true }
+// Real aggregated analysis function
+function generateRealAggregatedAnalysis(individualResults) {
+    console.log('🔄 Generating real aggregated analysis from actual extracted data');
+    
+    const results = Object.values(individualResults);
+    const validResults = results.filter(r => r.confidence_assessment && !r.input_data?.error);
+    
+    if (validResults.length === 0) {
+        return {
+            overall_confidence: 0.1,
+            recommendation: {
+                status: 'reject',
+                reason: 'No valid data could be extracted from submitted evidence',
+                action: 'Claim rejected due to insufficient evidence'
             },
-            damage_assessment: {
-                damage_percentage: damagePercentage,
-                method: 'vegetation_index_analysis',
-                confidence: 0.8,
-                vegetation_health: 1 - damagePercentage
+            summary: {
+                total_files_processed: results.length,
+                successful_extractions: 0,
+                failed_extractions: results.length
             }
+        };
+    }
+    
+    // Calculate real aggregated confidence
+    const confidenceScores = validResults.map(r => r.confidence_assessment?.overall_confidence || 0);
+    const avgConfidence = confidenceScores.reduce((a, b) => a + b) / confidenceScores.length;
+    
+    // Analyze EXIF data availability
+    const exifAvailable = validResults.filter(r => r.extracted_exif_data?.available).length;
+    const weatherDataSuccess = validResults.filter(r => r.weather_verification?.api_success).length;
+    const geofencingSuccess = validResults.filter(r => r.geofencing_analysis?.geofencing_available).length;
+    const coordinateMatches = validResults.filter(r => r.coordinate_analysis?.coordinates_match).length;
+    
+    // Determine final recommendation based on real data
+    let finalRecommendation;
+    if (avgConfidence >= 0.8 && coordinateMatches >= validResults.length * 0.8) {
+        finalRecommendation = {
+            status: 'approve',
+            reason: `High confidence (${(avgConfidence * 100).toFixed(0)}%) with good coordinate matching`,
+            action: 'Process claim automatically'
+        };
+    } else if (avgConfidence >= 0.6) {
+        finalRecommendation = {
+            status: 'manual_review',
+            reason: `Moderate confidence (${(avgConfidence * 100).toFixed(0)}%) requires human verification`,
+            action: 'Schedule manual review'
+        };
+    } else {
+        finalRecommendation = {
+            status: 'additional_evidence',
+            reason: `Low confidence (${(avgConfidence * 100).toFixed(0)}%) insufficient evidence quality`,
+            action: 'Request additional documentation'
+        };
+    }
+    
+    return {
+        overall_confidence: avgConfidence,
+        recommendation: finalRecommendation,
+        summary: {
+            total_files_processed: results.length,
+            successful_extractions: validResults.length,
+            failed_extractions: results.length - validResults.length,
+            exif_data_extracted: exifAvailable,
+            weather_data_obtained: weatherDataSuccess,
+            geofencing_successful: geofencingSuccess,
+            coordinate_matches: coordinateMatches
         },
-        processing_info: {
-            timestamp: Date.now(),
-            processing_version: '2.0',
-            weather_api_success: true,
-            all_validations_passed: true
+        detailed_breakdown: {
+            confidence_scores: confidenceScores,
+            average_confidence: avgConfidence,
+            processing_timestamp: Date.now()
         }
     };
 }
+
 
 function generateMockMedia() {
     const steps = ['corner-ne', 'corner-nw', 'corner-se', 'corner-sw', 'damaged-crop', 'farm-video'];

@@ -3,15 +3,16 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './contexts/AuthContext';
 import { ClaimProvider } from './contexts/ClaimContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import Header from './components/Header';
+import Header from './components/header/Header';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import ClaimForm from './pages/ClaimForm';
-import MediaCapture from './pages/MediaCapture';
+import Dashboard from './pages/dashboard/Dashboard';
+import ClaimForm from './pages/claimform/ClaimForm';
+import MediaCapture from './pages/mediaCapture/MediaCapture';
 import ClaimsList from './pages/ClaimsList';
 import ClaimResults from './pages/ClaimResults';
 import './styles/App.css';
-
+import AboutUs from './pages/aboutus/AboutUs';
+import Pricing from './pages/pricing/Pricing';
 function App() {
   return (
     <AuthProvider>
@@ -68,6 +69,8 @@ function App() {
 
                 {/* Redirect */}
                 <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="/about-us" element={<ProtectedRoute><AboutUs /></ProtectedRoute>} />
+                <Route path="/pricing" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
               </Routes>
             </main>
           </div>

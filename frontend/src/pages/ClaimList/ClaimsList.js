@@ -36,7 +36,7 @@ const ClaimsList = () => {
 
             // ✅ OPTION 1: Try to fetch from real API first
             try {
-                const response = await api.get('/claims/list', {
+                const response = await api.get('/api/claims/list', {
                     params: {
                         filter: filter !== 'all' ? filter : undefined,
                         page: currentPage,

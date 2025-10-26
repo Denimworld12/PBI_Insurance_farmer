@@ -28,7 +28,7 @@ const Login = () => {
     setError('');
     
     try {
-      const response = await api.post('/auth/send-otp', { phoneNumber });
+      const response = await api.post('/api/auth/send-otp', { phoneNumber });
       
       if (response.data.success) {
         setStep(2);
@@ -58,7 +58,7 @@ const Login = () => {
     setError('');
     
     try {
-      const response = await api.post('/auth/verify-otp', { phoneNumber, otp });
+      const response = await api.post('/api/auth/verify-otp', { phoneNumber, otp });
       
       if (response.data.success) {
         login(response.data.token, response.data.user);

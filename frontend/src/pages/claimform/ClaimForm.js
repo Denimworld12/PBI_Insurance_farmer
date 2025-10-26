@@ -33,7 +33,7 @@ const ClaimForm = () => {
   const fetchInsuranceDetails = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/insurance/${insuranceId}`);
+      const response = await api.get(`/api/insurance/${insuranceId}`);
       
       if (response.data.insurance) {
         setInsurance(response.data.insurance);
@@ -90,7 +90,7 @@ const ClaimForm = () => {
       updateFormData(formData);
       const documentId = generateDocumentId();
 
-      await api.post('/claims/initialize', {
+      await api.post('/api/claims/initialize', {
         insuranceId,
         formData,
         documentId

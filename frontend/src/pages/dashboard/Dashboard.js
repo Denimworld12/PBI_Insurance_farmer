@@ -22,7 +22,7 @@ const Dashboard = () => {
       setError(null);
       
       console.log('Fetching insurances from API...');
-      const response = await api.get('/insurance/list');
+      const response = await api.get('/api/insurance/list');
 
       if (response.data.success && response.data.insurances) {
         setInsurances(response.data.insurances);

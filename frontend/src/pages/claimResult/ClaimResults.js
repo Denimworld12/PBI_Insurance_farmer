@@ -24,7 +24,7 @@ const ClaimResults = () => {
       console.log(`Fetching results for document: ${documentId}`);
       
       // ✅ FIXED: Using api utility instead of fetch
-      const response = await api.get(`/claims/results/${documentId}`);
+      const response = await api.get(`/api/claims/results/${documentId}`);
       const data = response.data;
 
       if (data.success && data.processing_result) {

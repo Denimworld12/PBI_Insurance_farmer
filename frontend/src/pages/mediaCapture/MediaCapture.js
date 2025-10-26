@@ -247,7 +247,7 @@ const MediaCapture = () => {
       console.log(`📤 Uploading ${stepId}...`);
 
       // ✅ FIXED: Using api utility with proper headers
-      const response = await api.post('/claims/upload', formData, {
+      const response = await api.post('/api/claims/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
@@ -295,7 +295,7 @@ const MediaCapture = () => {
       console.log(`🐍 Triggering batch Python processing via /complete...`);
 
       // ✅ FIXED: Using api utility
-      const completionResponse = await api.post('/claims/complete', {
+      const completionResponse = await api.post('/api/claims/complete', {
         documentId,
         media: uploadResults,
         totalSteps: CAPTURE_STEPS.length,

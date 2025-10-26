@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useReducer } from 'react';
+import React, { createContext, useContext, useState, useReducer, useCallback } from 'react';
 
 const ClaimContext = createContext();
 
@@ -14,19 +14,25 @@ const claimReducer = (state, action) => {
   switch (action.type) {
     case 'SET_INSURANCE':
       return { ...state, selectedInsurance: action.payload };
+    
     case 'SET_FORM_DATA':
       return { ...state, formData: { ...state.formData, ...action.payload } };
+    
     case 'SET_DOCUMENT_ID':
       return { ...state, documentId: action.payload };
+    
     case 'ADD_MEDIA':
       return { 
         ...state, 
         capturedMedia: { ...state.capturedMedia, [action.stepId]: action.payload } 
       };
+    
     case 'SET_PROCESSING_RESULT':
       return { ...state, processingResult: action.payload };
+    
     case 'RESET_CLAIM':
       return initialState;
+    
     default:
       return state;
   }
@@ -55,33 +61,40 @@ export const ClaimProvider = ({ children }) => {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const setSelectedInsurance = (insurance) => {
+  // ✅ Memoized functions to prevent unnecessary re-renders
+  const setSelectedInsurance = useCallback((insurance) => {
     dispatch({ type: 'SET_INSURANCE', payload: insurance });
-  };
+  }, []);
 
-  const updateFormData = (data) => {
+  const updateFormData = useCallback((data) => {
     dispatch({ type: 'SET_FORM_DATA', payload: data });
-  };
+  }, []);
 
-  const generateDocumentId = () => {
-    const numbers = Math.floor(10000000 + Math.random() * 90000000);
-    const letters = Math.random().toString(36).substring(2, 4).toUpperCase();
-    const documentId = numbers + letters;
+  const generateDocumentId = useCallback(() => {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 9);
+    const documentId = `CLM-${timestamp}-${random}`.toUpperCase();
+    
     dispatch({ type: 'SET_DOCUMENT_ID', payload: documentId });
+    console.log('✅ Generated Document ID:', documentId);
+    
     return documentId;
-  };
+  }, []);
 
-  const addCapturedMedia = (stepId, mediaData) => {
+  const addCapturedMedia = useCallback((stepId, mediaData) => {
     dispatch({ type: 'ADD_MEDIA', stepId, payload: mediaData });
-  };
+    console.log(`✅ Media captured for step: ${stepId}`);
+  }, []);
 
-  const setProcessingResult = (result) => {
+  const setProcessingResult = useCallback((result) => {
     dispatch({ type: 'SET_PROCESSING_RESULT', payload: result });
-  };
+    console.log('✅ Processing result updated');
+  }, []);
 
-  const resetClaim = () => {
+  const resetClaim = useCallback(() => {
     dispatch({ type: 'RESET_CLAIM' });
-  };
+    console.log('✅ Claim state reset');
+  }, []);
 
   const value = {
     claimState,

@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import api from '../../utils/api';
 import './mediacapture.css';
 
 const MediaCapture = () => {
   const { documentId } = useParams();
   const navigate = useNavigate();
-  
-  // State management
+
   const [stream, setStream] = useState(null);
   const [coords, setCoords] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -17,14 +17,12 @@ const MediaCapture = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // Refs
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingTimerRef = useRef(null);
-  
-  // Capture steps configuration
+
   const CAPTURE_STEPS = [
     { id: 'corner-ne', label: 'Northeast Corner', type: 'photo', icon: '📍', required: true, description: 'Capture the northeast corner of your farm' },
     { id: 'corner-nw', label: 'Northwest Corner', type: 'photo', icon: '📍', required: true, description: 'Capture the northwest corner of your farm' },
@@ -34,7 +32,6 @@ const MediaCapture = () => {
     { id: 'farm-video', label: 'Farm Overview Video', type: 'video', icon: '🎥', required: false, description: '10-second overview of your farm' }
   ];
 
-  // Initialize camera and GPS
   useEffect(() => {
     initializeCamera();
     return () => {
@@ -45,14 +42,14 @@ const MediaCapture = () => {
         clearInterval(recordingTimerRef.current);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const initializeCamera = async () => {
     try {
       console.log('🎥 Initializing camera with high-accuracy GPS...');
       setError(null);
-      
-      // Request GPS
+
       if (navigator.geolocation) {
         const position = await new Promise((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -61,7 +58,7 @@ const MediaCapture = () => {
             maximumAge: 30000
           });
         });
-        
+
         setCoords({
           lat: position.coords.latitude,
           lon: position.coords.longitude,
@@ -69,8 +66,7 @@ const MediaCapture = () => {
         });
         console.log(`✅ GPS Located: ${position.coords.latitude}, ${position.coords.longitude}`);
       }
-      
-      // Request camera
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -78,16 +74,26 @@ const MediaCapture = () => {
           height: { ideal: 1080, min: 720 }
         }
       });
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         setStream(mediaStream);
         console.log('✅ Camera initialized successfully');
       }
-      
+
     } catch (error) {
       console.error('❌ Camera/GPS initialization failed:', error);
-      setError(`Failed to access camera or GPS: ${error.message}`);
+      
+      let errorMessage = 'Failed to access camera or GPS.';
+      if (error.name === 'NotAllowedError') {
+        errorMessage = 'Camera/GPS permission denied. Please allow access and refresh.';
+      } else if (error.name === 'NotFoundError') {
+        errorMessage = 'No camera device found.';
+      } else if (error.code === 1) {
+        errorMessage = 'Location permission denied. Please enable GPS.';
+      }
+      
+      setError(errorMessage);
     }
   };
 
@@ -98,14 +104,13 @@ const MediaCapture = () => {
       setLoading(true);
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      
+
       canvas.width = video.videoWidth || 1920;
       canvas.height = video.videoHeight || 1080;
 
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Add overlay
       const timestamp = new Date();
       const overlayLines = [
         `📅 ${timestamp.toLocaleDateString('en-GB')}`,
@@ -113,31 +118,30 @@ const MediaCapture = () => {
         `📍 ${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`,
         `${CAPTURE_STEPS[currentStep].label}`
       ];
-      
+
       const fontSize = Math.max(14, canvas.width * 0.015);
       ctx.font = `${fontSize}px Arial, sans-serif`;
       ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
       ctx.shadowBlur = 4;
-      
+
       const padding = 10;
       const lineHeight = fontSize + 4;
       const overlayHeight = (overlayLines.length * lineHeight) + (padding * 2);
-      
+
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(10, canvas.height - overlayHeight - 10, canvas.width - 20, overlayHeight);
-      
+
       ctx.fillStyle = 'white';
       overlayLines.forEach((line, index) => {
         ctx.fillText(line, 20, canvas.height - overlayHeight - 10 + padding + (index + 1) * lineHeight);
       });
 
-      const blob = await new Promise(resolve => 
+      const blob = await new Promise(resolve =>
         canvas.toBlob(resolve, 'image/jpeg', 0.95)
       );
 
-      // Store blob locally (NOT uploaded yet)
       setCapturedBlobs(prev => ({
         ...prev,
         [CAPTURE_STEPS[currentStep].id]: {
@@ -150,7 +154,6 @@ const MediaCapture = () => {
 
       console.log(`✅ Photo captured for step: ${CAPTURE_STEPS[currentStep].id}`);
 
-      // Move to next step
       if (currentStep < CAPTURE_STEPS.length - 1) {
         setCurrentStep(prev => prev + 1);
       }
@@ -170,7 +173,7 @@ const MediaCapture = () => {
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'video/webm;codecs=vp9'
       });
-      
+
       mediaRecorderRef.current = mediaRecorder;
       const chunks = [];
 
@@ -181,7 +184,7 @@ const MediaCapture = () => {
       mediaRecorder.onstop = async () => {
         const blob = new Blob(chunks, { type: 'video/webm' });
         const timestamp = new Date();
-        
+
         setCapturedBlobs(prev => ({
           ...prev,
           [CAPTURE_STEPS[currentStep].id]: {
@@ -226,7 +229,7 @@ const MediaCapture = () => {
     }
   };
 
-  // ★ UPDATED: Upload single file (just storage, no processing)
+  // ✅ FIXED: Using api utility instead of fetch
   const uploadSingleFile = async (stepId, captureData) => {
     try {
       setUploadProgress(prev => ({ ...prev, [stepId]: 'uploading' }));
@@ -243,19 +246,18 @@ const MediaCapture = () => {
 
       console.log(`📤 Uploading ${stepId}...`);
 
-      const response = await fetch('http://localhost:5000/api/claims/upload', {
-        method: 'POST',
-        body: formData
+      // ✅ FIXED: Using api utility with proper headers
+      const response = await api.post('/claims/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      const data = await response.json();
-      
-      if (!response.ok) throw new Error(data.error || 'Upload failed');
+      const data = response.data;
 
       console.log(`✅ Upload successful for ${stepId} (${data.filesUploaded} total)`);
       setUploadProgress(prev => ({ ...prev, [stepId]: 'success' }));
-      
-      // ★ CHANGE: Return only upload confirmation (no processing result)
+
       return {
         stepId,
         success: data.success,
@@ -269,7 +271,7 @@ const MediaCapture = () => {
     }
   };
 
-  // ★ UPDATED: Submit all evidence with batch processing
+  // ✅ FIXED: Using api utility instead of fetch
   const submitAllEvidence = async () => {
     try {
       setIsSubmitting(true);
@@ -278,7 +280,6 @@ const MediaCapture = () => {
       const capturedSteps = Object.keys(capturedBlobs);
       console.log(`🚀 Starting upload of ${capturedSteps.length} files...`);
 
-      // ★ STEP 1: Upload all files (stored on server, NOT processed yet)
       const uploadResults = {};
       for (const stepId of capturedSteps) {
         try {
@@ -293,35 +294,28 @@ const MediaCapture = () => {
       console.log(`✅ All ${capturedSteps.length} files uploaded successfully`);
       console.log(`🐍 Triggering batch Python processing via /complete...`);
 
-      // ★ STEP 2: Call completion endpoint to trigger Python batch processing
-      const completionResponse = await fetch('http://localhost:5000/api/claims/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          media: uploadResults,
-          totalSteps: CAPTURE_STEPS.length,
-          completedSteps: capturedSteps.length
-        })
+      // ✅ FIXED: Using api utility
+      const completionResponse = await api.post('/claims/complete', {
+        documentId,
+        media: uploadResults,
+        totalSteps: CAPTURE_STEPS.length,
+        completedSteps: capturedSteps.length
       });
 
-      if (!completionResponse.ok) {
-        const errorData = await completionResponse.json();
-        throw new Error(errorData.error || 'Completion failed');
-      }
+      console.log('✅ Batch processing completed:', completionResponse.data);
 
-      const completionData = await completionResponse.json();
-      console.log('✅ Batch processing completed:', completionData);
-
-      // ★ STEP 3: Wait a moment for processing, then navigate
       await new Promise(resolve => setTimeout(resolve, 1500));
-      
+
       console.log(`🎯 Navigating to results page: /claim-results/${documentId}`);
       navigate(`/claim-results/${documentId}`);
 
     } catch (error) {
       console.error('❌ Submission failed:', error);
-      setError(`Submission failed: ${error.message}`);
+      
+      const errorMessage = error.response?.data?.message || 
+        error.message || 
+        'Submission failed. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -329,13 +323,12 @@ const MediaCapture = () => {
 
   const currentStepData = CAPTURE_STEPS[currentStep];
   const capturedSteps = Object.keys(capturedBlobs);
-  const allCaptured = CAPTURE_STEPS.every(step => 
+  const allCaptured = CAPTURE_STEPS.every(step =>
     !step.required || capturedBlobs[step.id]
   );
 
   return (
     <div className="media-capture-page">
-      {/* Header */}
       <div className="capture-header">
         <div className="header-content">
           <h1>📸 Evidence Collection</h1>
@@ -346,7 +339,6 @@ const MediaCapture = () => {
         </div>
       </div>
 
-      {/* Error Display */}
       {error && (
         <div className="error-banner">
           <div className="error-content">
@@ -357,67 +349,10 @@ const MediaCapture = () => {
         </div>
       )}
 
-      {/* GPS Status */}
-      <div className={`gps-status ${coords ? 'active' : 'pending'}`}>
-        <span className="gps-icon">{coords ? '📍' : '⏳'}</span>
-        <div className="gps-info">
-          {coords ? (
-            <>
-              <strong>GPS Located</strong>
-              <div className="gps-coords">
-                {coords.lat.toFixed(6)}, {coords.lon.toFixed(6)}
-                <span className="gps-accuracy">(±{Math.round(coords.accuracy)}m)</span>
-              </div>
-            </>
-          ) : (
-            <strong>Acquiring GPS signal...</strong>
-          )}
-        </div>
-      </div>
-
-      {/* Progress Steps */}
-      <div className="steps-progress">
-        <div className="progress-bar-container">
-          <div 
-            className="progress-bar-fill" 
-            style={{ width: `${(capturedSteps.length / CAPTURE_STEPS.length) * 100}%` }}
-          ></div>
-        </div>
-        
-        <div className="steps-grid">
-          {CAPTURE_STEPS.map((step, index) => {
-            const isCaptured = capturedBlobs[step.id];
-            const isCurrent = index === currentStep;
-            const uploadStatus = uploadProgress[step.id];
-            
-            return (
-              <div
-                key={step.id}
-                className={`step-indicator ${isCaptured ? 'completed' : ''} ${isCurrent ? 'current' : ''}`}
-              >
-                <div className="step-icon">
-                  {uploadStatus === 'uploading' && '⏳'}
-                  {uploadStatus === 'success' && '✅'}
-                  {uploadStatus === 'error' && '❌'}
-                  {!uploadStatus && (isCaptured ? '📁' : isCurrent ? step.icon : '⭕')}
-                </div>
-                <div className="step-label">{step.label}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Camera View */}
       {!allCaptured && (
-        <div className="capture-section">
+        <div className="capture-section mobile-layout">
           <div className="capture-card">
-            <div className="capture-header-text">
-              <h2>{currentStepData.icon} {currentStepData.label}</h2>
-              <p>{currentStepData.description}</p>
-            </div>
-
-            <div className="camera-container">
+            <div className="camera-container top-camera">
               <video
                 ref={videoRef}
                 autoPlay
@@ -425,9 +360,9 @@ const MediaCapture = () => {
                 muted
                 className="camera-feed"
               />
-              
+
               {isRecording && (
-                <div className="recording-indicator">
+                <div className="recording-indicator top-right">
                   <span className="recording-dot">●</span>
                   REC {10 - recordingTime}s
                 </div>
@@ -441,7 +376,12 @@ const MediaCapture = () => {
               )}
             </div>
 
-            <div className="capture-controls">
+            <div className="capture-header-text mobile-info">
+              <h2>{currentStepData.icon} {currentStepData.label}</h2>
+              <p>{currentStepData.description}</p>
+            </div>
+
+            <div className="capture-controls mobile-controls">
               {currentStepData.type === 'photo' ? (
                 <button
                   onClick={capturePhoto}
@@ -464,14 +404,45 @@ const MediaCapture = () => {
         </div>
       )}
 
-      {/* Submit Section */}
+      <div className="steps-progress">
+        <div className="progress-bar-container">
+          <div
+            className="progress-bar-fill"
+            style={{ width: `${(capturedSteps.length / CAPTURE_STEPS.length) * 100}%` }}
+          />
+        </div>
+
+        <div className="steps-grid">
+          {CAPTURE_STEPS.map((step, index) => {
+            const isCaptured = capturedBlobs[step.id];
+            const isCurrent = index === currentStep;
+            const uploadStatus = uploadProgress[step.id];
+
+            return (
+              <div
+                key={step.id}
+                className={`step-indicator ${isCaptured ? 'completed' : ''} ${isCurrent ? 'current' : ''}`}
+              >
+                <div className="step-icon">
+                  {uploadStatus === 'uploading' && '⏳'}
+                  {uploadStatus === 'success' && '✅'}
+                  {uploadStatus === 'error' && '❌'}
+                  {!uploadStatus && (isCaptured ? '📁' : isCurrent ? step.icon : '⭕')}
+                </div>
+                <div className="step-label">{step.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {allCaptured && (
         <div className="submit-section">
           <div className="submit-card">
             <div className="success-icon">✅</div>
             <h3>All Evidence Captured!</h3>
             <p>{capturedSteps.length} files ready to upload and analyze</p>
-            
+
             <button
               onClick={submitAllEvidence}
               disabled={isSubmitting}
@@ -480,7 +451,6 @@ const MediaCapture = () => {
               {isSubmitting ? '🔄 Uploading & Processing...' : '🚀 Submit All Evidence'}
             </button>
 
-            {/* ★ UPDATED: Better user feedback */}
             {isSubmitting && (
               <div className="submitting-status">
                 <div className="status-message">📤 Uploading files to server...</div>
@@ -492,7 +462,23 @@ const MediaCapture = () => {
         </div>
       )}
 
-      {/* Hidden canvas */}
+      <div className={`gps-status ${coords ? 'active' : 'pending'}`}>
+        <span className="gps-icon">{coords ? '📍' : '⏳'}</span>
+        <div className="gps-info">
+          {coords ? (
+            <>
+              <strong>GPS Located</strong>
+              <div className="gps-coords">
+                {coords.lat.toFixed(6)}, {coords.lon.toFixed(6)}
+                <span className="gps-accuracy">(±{Math.round(coords.accuracy)}m)</span>
+              </div>
+            </>
+          ) : (
+            <strong>Acquiring GPS signal...</strong>
+          )}
+        </div>
+      </div>
+
       <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
   );

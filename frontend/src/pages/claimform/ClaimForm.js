@@ -4,6 +4,7 @@ import { useClaim } from '../../contexts/ClaimContext';
 import { INDIAN_STATES, SEASONS, CROP_TYPES, LOSS_REASONS } from '../../utils/constants';
 import api from '../../utils/api';
 import './claimform.css';
+
 const ClaimForm = () => {
   const { insuranceId } = useParams();
   const navigate = useNavigate();
@@ -26,15 +27,23 @@ const ClaimForm = () => {
 
   useEffect(() => {
     fetchInsuranceDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insuranceId]);
 
   const fetchInsuranceDetails = async () => {
     try {
+      setLoading(true);
       const response = await api.get(`/insurance/${insuranceId}`);
-      setInsurance(response.data.insurance);
-      setSelectedInsurance(response.data.insurance);
+      
+      if (response.data.insurance) {
+        setInsurance(response.data.insurance);
+        setSelectedInsurance(response.data.insurance);
+      } else {
+        throw new Error('Insurance not found');
+      }
     } catch (error) {
       console.error('Failed to fetch insurance details:', error);
+      alert('Failed to load insurance details. Redirecting to dashboard...');
       navigate('/');
     } finally {
       setLoading(false);
@@ -58,7 +67,9 @@ const ClaimForm = () => {
     if (!formData.scheme) newErrors.scheme = 'Scheme is required';
     if (!formData.insuranceNumber) newErrors.insuranceNumber = 'Insurance number is required';
     if (!formData.cropType) newErrors.cropType = 'Crop type is required';
-    if (!formData.farmArea || formData.farmArea <= 0) newErrors.farmArea = 'Valid farm area is required';
+    if (!formData.farmArea || parseFloat(formData.farmArea) <= 0) {
+      newErrors.farmArea = 'Valid farm area is required';
+    }
     if (!formData.lossReason) newErrors.lossReason = 'Loss reason is required';
 
     setErrors(newErrors);
@@ -68,7 +79,10 @@ const ClaimForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
 
     try {
       setLoading(true);
@@ -86,13 +100,16 @@ const ClaimForm = () => {
 
     } catch (error) {
       console.error('Failed to initialize claim:', error);
-      alert('Failed to proceed. Please try again.');
+      
+      const errorMessage = error.response?.data?.message || 
+        'Failed to process your claim. Please try again.';
+      alert(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
+  if (loading && !insurance) {
     return (
       <div className="claim-form-loading">
         <div className="loading-container">
@@ -104,41 +121,27 @@ const ClaimForm = () => {
   }
 
   const availableSchemes = insurance?.schemes?.filter(scheme =>
-    !formData.season || scheme.seasons.includes(formData.season)
+    !formData.season || scheme.seasons?.includes(formData.season)
   ) || [];
 
   return (
     <div className="claim-form-page">
-      {/* Government letterhead style header */}
       <div className="gov-header">
         <div className="gov-emblem">
-          <img src="/images/government-emblem.png" alt="Government Emblem" />
+          <img 
+            src="/images/government-emblem.png" 
+            alt="Government Emblem"
+            loading="lazy"
+          />
         </div>
-        <div className="gov-title ">
+        <div className="gov-title">
           <h1>Government of India</h1>
           <h2>Ministry of Agriculture & Farmers Welfare</h2>
           <h3>Crop Insurance Claim Application</h3>
         </div>
       </div>
 
-
-
       <div className="claim-form-container">
-        {/* Insurance details banner
-        <div className="insurance-banner">
-          <div className="banner-content">
-            <div className="banner-left">
-              <span className="banner-label">Insurance Provider</span>
-              <h4 className="banner-value">{insurance?.name}</h4>
-            </div>
-            <div className="banner-right">
-              <span className="banner-label">Coverage</span>
-              <p className="banner-description">{insurance?.description}</p>
-            </div>
-          </div>
-        </div> */}
-
-        {/* Main form card */}
         <div className="form-card">
           <div className="form-header">
             <h2 className="form-title">Claim Application Form</h2>
@@ -148,7 +151,6 @@ const ClaimForm = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="claim-form">
-            {/* Section 1: Location & Policy Details */}
             <div className="form-section">
               <div className="section-header">
                 <span className="section-number">01</span>
@@ -156,7 +158,6 @@ const ClaimForm = () => {
               </div>
 
               <div className="form-grid">
-                {/* State */}
                 <div className="form-field">
                   <label htmlFor="state" className="field-label">
                     State <span className="required">*</span>
@@ -179,7 +180,6 @@ const ClaimForm = () => {
                   {errors.state && <span className="error-message">{errors.state}</span>}
                 </div>
 
-                {/* Season */}
                 <div className="form-field">
                   <label htmlFor="season" className="field-label">
                     Season <span className="required">*</span>
@@ -202,7 +202,6 @@ const ClaimForm = () => {
                   {errors.season && <span className="error-message">{errors.season}</span>}
                 </div>
 
-                {/* Scheme */}
                 <div className="form-field">
                   <label htmlFor="scheme" className="field-label">
                     Insurance Scheme <span className="required">*</span>
@@ -231,7 +230,6 @@ const ClaimForm = () => {
                   )}
                 </div>
 
-                {/* Year */}
                 <div className="form-field">
                   <label htmlFor="year" className="field-label">
                     Policy Year <span className="required">*</span>
@@ -251,7 +249,6 @@ const ClaimForm = () => {
                   </div>
                 </div>
 
-                {/* Insurance Number - Full width */}
                 <div className="form-field form-field-full">
                   <label htmlFor="insuranceNumber" className="field-label">
                     Insurance Policy Number <span className="required">*</span>
@@ -273,7 +270,6 @@ const ClaimForm = () => {
               </div>
             </div>
 
-            {/* Section 2: Crop Information */}
             <div className="form-section">
               <div className="section-header">
                 <span className="section-number">02</span>
@@ -281,7 +277,6 @@ const ClaimForm = () => {
               </div>
 
               <div className="form-grid">
-                {/* Crop Type */}
                 <div className="form-field">
                   <label htmlFor="cropType" className="field-label">
                     Crop Type <span className="required">*</span>
@@ -304,7 +299,6 @@ const ClaimForm = () => {
                   {errors.cropType && <span className="error-message">{errors.cropType}</span>}
                 </div>
 
-                {/* Farm Area */}
                 <div className="form-field">
                   <label htmlFor="farmArea" className="field-label">
                     Farm Area (acres) <span className="required">*</span>
@@ -328,7 +322,6 @@ const ClaimForm = () => {
               </div>
             </div>
 
-            {/* Section 3: Loss Details */}
             <div className="form-section">
               <div className="section-header">
                 <span className="section-number">03</span>
@@ -336,7 +329,6 @@ const ClaimForm = () => {
               </div>
 
               <div className="form-grid">
-                {/* Loss Reason - Full width */}
                 <div className="form-field form-field-full">
                   <label htmlFor="lossReason" className="field-label">
                     Primary Cause of Loss <span className="required">*</span>
@@ -361,7 +353,6 @@ const ClaimForm = () => {
                   {errors.lossReason && <span className="error-message">{errors.lossReason}</span>}
                 </div>
 
-                {/* Loss Description - Full width */}
                 <div className="form-field form-field-full">
                   <label htmlFor="lossDescription" className="field-label">
                     Detailed Loss Description
@@ -384,7 +375,6 @@ const ClaimForm = () => {
               </div>
             </div>
 
-            {/* Form Actions */}
             <div className="form-actions">
               <button
                 type="button"
@@ -415,7 +405,6 @@ const ClaimForm = () => {
             </div>
           </form>
 
-          {/* Form footer */}
           <div className="form-footer">
             <p className="footer-text">
               All information provided will be verified with official records.

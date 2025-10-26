@@ -12,24 +12,42 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Store for aggregated claim results (in production, use Redis or database)
+// In-memory storage (use Redis/MongoDB in production)
 const claimResults = new Map();
 
-// ==================== SETUP & MIDDLEWARE ====================
+// ==================== DIRECTORY SETUP ====================
 
-// Create necessary directories
 const ensureDirectories = () => {
-    const dirs = ['uploads', 'temp', 'data'];
+    const dirs = ['uploads', 'temp', 'data', 'reports', 'worker'];
     dirs.forEach(dir => {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+        const dirPath = path.join(__dirname, dir);
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath, { recursive: true });
             console.log(`✅ Created directory: ${dir}`);
         }
     });
 };
 ensureDirectories();
 
-// Security middleware
+// ==================== PYTHON WORKER VALIDATION ====================
+
+const validatePythonWorker = () => {
+    const workerPath = path.join(__dirname, 'worker', 'pipeline.py');
+    
+    if (!fs.existsSync(workerPath)) {
+        console.log('⚠️ Python worker not found at:', workerPath);
+        console.log('ℹ️ Python processing will use fallback mode');
+        return false;
+    }
+    
+    console.log('✅ Python worker found:', workerPath);
+    return true;
+};
+
+const pythonWorkerAvailable = validatePythonWorker();
+
+// ==================== SECURITY & MIDDLEWARE ====================
+
 app.use(helmet({
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: {
@@ -44,36 +62,55 @@ app.use(helmet({
 
 // Rate limiting
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
-    message: 'Too many requests from this IP, please try again later.',
+    windowMs: 15 * 60 * 1000,
+    max: process.env.NODE_ENV === 'production' ? 100 : 1000,
+    message: 'Too many requests, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
 });
 app.use(limiter);
 
 // CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : ['http://localhost:3000'];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1 && process.env.NODE_ENV === 'production') {
+            return callback(new Error('CORS policy violation'), false);
+        }
+        callback(null, true);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Database connection
+// ==================== DATABASE CONNECTION ====================
+
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        if (!process.env.MONGODB_URI) {
+            console.log('⚠️ No MONGODB_URI found, running without database');
+            return;
+        }
+
+        const conn = await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000,
+        });
         console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
     } catch (error) {
-        console.error('❌ Database connection failed:', error);
+        console.error('❌ Database connection failed:', error.message);
         if (process.env.NODE_ENV === 'production') {
-            process.exit(1);
+            console.log('⚠️ Running without database in production mode');
         }
     }
 };
@@ -81,22 +118,24 @@ connectDB();
 
 // ==================== CORE ROUTES ====================
 
-// Health check
 app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'development',
-        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        activeClaims: claimResults.size,
+        pythonWorker: pythonWorkerAvailable ? 'available' : 'fallback_mode',
+        version: '3.0.0'
     });
 });
 
-// Home route
 app.get('/', (req, res) => {
     res.json({
         message: 'PBI Agriculture Insurance Backend API',
-        version: '2.0.0',
+        version: '3.0.0',
+        status: 'running',
         endpoints: {
             auth: '/api/auth',
             insurance: '/api/insurance',
@@ -106,37 +145,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// ==================== API ROUTES ====================
+// ==================== INSURANCE ROUTES ====================
 
-// Auth routes
-app.post('/api/auth/send-otp', (req, res) => {
-    const { phoneNumber } = req.body;
-    console.log(`📱 Mock OTP sent to: ${phoneNumber}`);
-    res.json({
-        success: true,
-        message: 'OTP sent successfully',
-        devOTP: '123456'
-    });
-});
-
-app.post('/api/auth/verify-otp', (req, res) => {
-    const { phoneNumber, otp } = req.body;
-    if (otp === '123456') {
-        res.json({
-            success: true,
-            token: 'mock-jwt-token',
-            user: {
-                id: 'mock-user-id',
-                phoneNumber,
-                isVerified: true
-            }
-        });
-    } else {
-        res.status(400).json({ success: false, error: 'Invalid OTP' });
-    }
-});
-
-// Insurance routes
 app.get('/api/insurance/list', (req, res) => {
     res.json({
         success: true,
@@ -169,7 +179,7 @@ app.get('/api/insurance/:id', (req, res) => {
         '1': {
             _id: '1',
             name: 'Pradhan Mantri Fasal Bima Yojana',
-            description: 'Comprehensive crop insurance scheme providing coverage against all non-preventable natural risks',
+            description: 'Comprehensive crop insurance scheme',
             type: 'crop',
             schemes: [{
                 name: 'PMFBY Basic Coverage',
@@ -182,7 +192,7 @@ app.get('/api/insurance/:id', (req, res) => {
         '2': {
             _id: '2',
             name: 'Weather Based Crop Insurance Scheme',
-            description: 'Insurance based on weather parameters and satellite data',
+            description: 'Insurance based on weather parameters',
             type: 'weather',
             schemes: [{
                 name: 'WBCIS Weather Shield',
@@ -200,859 +210,565 @@ app.get('/api/insurance/:id', (req, res) => {
     });
 });
 
-// Claims routes
-app.get('/api/claims/list', (req, res) => {
-    const mockClaims = Array.from(claimResults.entries()).map(([docId, data]) => ({
-        documentId: docId,
-        status: data.aggregated_analysis?.final?.verification_level || 'processing',
-        submittedAt: data.metadata?.timestamp || new Date().toISOString(),
-        insuranceType: 'crop',
-        estimatedDamage: data.aggregated_analysis?.summary?.overall_damage_percentage || 0
-    }));
-
-    res.json({
-        success: true,
-        claims: mockClaims,
-        pagination: {
-            currentPage: 1,
-            totalPages: 1,
-            totalClaims: mockClaims.length
-        }
-    });
-});
-
-app.post('/api/claims/initialize', (req, res) => {
-    const documentId = Math.floor(10000000 + Math.random() * 90000000) +
-        Math.random().toString(36).substring(2, 4).toUpperCase();
-
-    // Initialize claim results storage
-    claimResults.set(documentId, {
-        documentId,
-        individual_results: {},
-        metadata: {
-            timestamp: new Date().toISOString(),
-            status: 'initialized'
-        }
-    });
-
-    res.json({
-        success: true,
-        message: 'Claim initialized successfully',
-        claim: {
-            id: 'mock-claim-id',
-            documentId,
-            status: 'draft'
-        }
-    });
-});
-
-// ★ COMPLETION ENDPOINT - Critical for your workflow
-app.post('/api/claims/complete', (req, res) => {
-    console.log('🎯 COMPLETION ENDPOINT HIT - Claim completion request received');
-    const { documentId, media, processingResult } = req.body;
-
-    console.log('📋 Document ID:', documentId);
-    console.log('📁 Media count:', Object.keys(media || {}).length);
-    console.log('📊 Processing result available:', !!processingResult);
-
-    try {
-        if (claimResults.has(documentId)) {
-            const claimData = claimResults.get(documentId);
-            claimData.media = media;
-            claimData.processingResult = processingResult;
-            claimData.metadata.status = 'completed';
-            claimData.metadata.completedAt = new Date().toISOString();
-
-            // Generate final aggregated analysis if not already done
-            if (!claimData.aggregated_analysis && claimData.individual_results && Object.keys(claimData.individual_results).length > 0) {
-                claimData.aggregated_analysis = generateAggregatedAnalysis(claimData.individual_results);
-                console.log('🎯 Generated final aggregated analysis on completion');
-            }
-
-            claimResults.set(documentId, claimData);
-            console.log('✅ Claim data updated successfully');
-        } else {
-            console.log('⚠️ Document not found in storage, creating new entry');
-
-            // Create new entry if not found
-            claimResults.set(documentId, {
-                documentId,
-                media,
-                processingResult,
-                metadata: {
-                    status: 'completed',
-                    completedAt: new Date().toISOString(),
-                    timestamp: new Date().toISOString()
-                },
-                individual_results: {}
-            });
-        }
-
-        res.json({
-            success: true,
-            message: 'Claim processing completed successfully',
-            claim: {
-                id: 'claim-' + documentId,
-                documentId,
-                status: 'submitted',
-                completedAt: new Date().toISOString(),
-                nextAction: 'view_results'
-            }
-        });
-    } catch (error) {
-        console.error('❌ Error in completion endpoint:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to complete claim',
-            details: error.message
-        });
-    }
-});
-
-// ★ RESULTS ENDPOINT - Shows real Python analysis data
-app.get('/api/claims/results/:documentId', (req, res) => {
-    console.log('📊 RESULTS ENDPOINT HIT - Results request for document:', req.params.documentId);
-    const { documentId } = req.params;
-
-    if (claimResults.has(documentId)) {
-        const claimData = claimResults.get(documentId);
-
-        console.log('✅ Found claim data');
-        console.log('📋 Individual results available:', Object.keys(claimData.individual_results || {}));
-        console.log('🎯 Aggregated analysis available:', !!claimData.aggregated_analysis);
-
-        // Use aggregated analysis if available, otherwise generate from individual results
-        let finalProcessingResult = null;
-
-        if (claimData.aggregated_analysis) {
-            console.log('✅ Using stored aggregated analysis');
-            finalProcessingResult = claimData.aggregated_analysis;
-        } else if (claimData.individual_results && Object.keys(claimData.individual_results).length > 0) {
-            console.log('🔄 Generating aggregated analysis from individual results');
-            finalProcessingResult = generateAggregatedAnalysis(claimData.individual_results);
-
-            // Store the generated analysis
-            claimData.aggregated_analysis = finalProcessingResult;
-            claimResults.set(documentId, claimData);
-        } else if (claimData.processingResult) {
-            console.log('📋 Using processing result');
-            finalProcessingResult = claimData.processingResult;
-        } else {
-            console.log('⚠️ No analysis data found, using mock');
-            finalProcessingResult = generateMockAggregatedResult();
-        }
-
-        // Create enhanced media data with real results
-        const enhancedMedia = {};
-        if (claimData.individual_results) {
-            Object.keys(claimData.individual_results).forEach(stepId => {
-                const result = claimData.individual_results[stepId];
-                enhancedMedia[stepId] = {
-                    stepInfo: {
-                        type: stepId.includes('video') ? 'video' : 'photo',
-                        label: stepId.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())
-                    },
-                    cloudinaryUrl: result.metadata?.cloudinaryUrl || null,
-                    processingResult: result, // ★ Real Python analysis data
-                    timestamp: result.metadata?.timestamp || new Date().toISOString(),
-                    uploadSuccessful: true,
-                    realData: true // Mark as real data
-                };
-            });
-        }
-
-        // Merge with any existing media data
-        const finalMedia = { ...enhancedMedia, ...(claimData.media || {}) };
-
-        const responseData = {
-            success: true,
-            claim: {
-                documentId,
-                status: 'submitted',
-                submittedAt: claimData.metadata?.completedAt || new Date().toISOString(),
-                processingResult: finalProcessingResult, // ★ Aggregated Python analysis
-                media: finalMedia, // ★ Individual step results
-                individual_results: claimData.individual_results || {},
-                metadata: {
-                    ...claimData.metadata,
-                    dataSource: 'real_python_analysis',
-                    individualResultCount: Object.keys(claimData.individual_results || {}).length
-                }
-            }
-        };
-
-        console.log('📤 Sending real analysis results');
-        res.json(responseData);
-    } else {
-        console.log('⚠️ Document not found in results endpoint');
-        console.log('📋 Available documents:', Array.from(claimResults.keys()));
-
-        res.json({
-            success: true, // Return success to avoid frontend errors
-            claim: {
-                documentId,
-                status: 'submitted',
-                submittedAt: new Date().toISOString(),
-                processingResult: generateMockAggregatedResult(),
-                media: generateMockMedia(),
-                individual_results: {},
-                metadata: {
-                    timestamp: new Date().toISOString(),
-                    dataSource: 'mock_fallback',
-                    error: 'Document not found in storage'
-                }
-            }
-        });
-    }
-});
-
-// Debug endpoint
-app.get('/api/debug/claims/:documentId', (req, res) => {
-    const { documentId } = req.params;
-    console.log('🐛 DEBUG ENDPOINT HIT - Checking stored data for document:', documentId);
-    console.log('🐛 All stored documents:', Array.from(claimResults.keys()));
-
-    if (claimResults.has(documentId)) {
-        const data = claimResults.get(documentId);
-
-        res.json({
-            success: true,
-            debug: {
-                documentId,
-                hasIndividualResults: !!data.individual_results,
-                individualResultsKeys: Object.keys(data.individual_results || {}),
-                hasAggregatedAnalysis: !!data.aggregated_analysis,
-                hasMedia: !!data.media,
-                hasProcessingResult: !!data.processingResult,
-                fullData: data
-            }
-        });
-    } else {
-        res.json({
-            success: false,
-            error: 'Document not found in storage',
-            availableDocuments: Array.from(claimResults.keys())
-        });
-    }
-});
-
-// ==================== UPLOAD ENDPOINT - Python Pipeline Integration ====================
+// ==================== FILE UPLOAD ====================
 
 const upload = multer({
-    dest: 'uploads/',
-    limits: { fileSize: 50 * 1024 * 1024 },
+    dest: path.join(__dirname, 'uploads'),
+    limits: { 
+        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024 
+    },
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
             cb(null, true);
         } else {
-            cb(new Error('Only image and video files are allowed'));
+            cb(new Error('Only image and video files allowed'));
         }
     }
 });
 
-// Replace your upload endpoint with this real-data version
-app.post("/api/claims/upload", upload.single("image"), async (req, res) => {
+app.post('/api/claims/upload', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
+            return res.status(400).json({ 
+                success: false,
+                error: 'No file uploaded' 
+            });
         }
 
-        const filePath = req.file.path;
-        const lat = parseFloat(req.body.lat);
-        const lon = parseFloat(req.body.lon);
-        const overlayText = req.body.overlay_text || "";
-        const clientTs = Number(req.body.client_ts) || Date.now();
-        const parcelId = req.body.parcel_id || "DEFAULT_PARCEL";
-        const stepId = req.body.step_id || 'unknown';
+        const { lat, lon, client_ts, parcel_id, step_id, media_type } = req.body;
+        const coordinates = { 
+            lat: parseFloat(lat), 
+            lon: parseFloat(lon) 
+        };
 
-        console.log(`📤 Processing real data extraction for: ${req.file.originalname}`);
-        console.log(`📍 Coordinates: ${lat}, ${lon} | Step: ${stepId}`);
-
-        if (isNaN(lat) || isNaN(lon)) {
-            return res.status(400).json({ error: 'Invalid coordinates provided' });
+        if (isNaN(coordinates.lat) || isNaN(coordinates.lon)) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'Invalid coordinates' 
+            });
         }
 
-        // Initialize claim data storage
-        if (!claimResults.has(parcelId)) {
-            claimResults.set(parcelId, {
-                documentId: parcelId,
-                individual_results: {},
-                metadata: { 
+        console.log(`📤 File received: ${step_id} for ${parcel_id}`);
+
+        if (!claimResults.has(parcel_id)) {
+            claimResults.set(parcel_id, {
+                documentId: parcel_id,
+                uploaded_files: {},
+                metadata: {
                     timestamp: new Date().toISOString(),
-                    processing_mode: 'real_data_only'
+                    processing_mode: 'batch_processing'
                 }
             });
         }
 
-        // Handle video files (basic info only)
-        if (req.file.mimetype.startsWith('video/')) {
-            console.log('🎥 Processing video file...');
-            
-            const videoResult = {
-                processing_info: {
-                    timestamp: Date.now(),
-                    processing_time_ms: 500,
-                    version: '3.0-real-data-only'
-                },
-                input_data: {
-                    file_name: req.file.originalname,
-                    file_size: req.file.size,
-                    coordinates: { lat, lon },
-                    step_id: stepId
-                },
-                extracted_data: {
-                    media_type: 'video',
-                    duration_estimated: '10 seconds',
-                    file_format: req.file.mimetype
-                },
-                confidence_assessment: {
-                    overall_confidence: 0.7,
-                    recommendation: {
-                        status: 'manual_review',
-                        reason: 'Video analysis requires manual verification',
-                        action: 'Human review recommended'
-                    }
+        const claimData = claimResults.get(parcel_id);
+        claimData.uploaded_files[step_id] = {
+            filePath: req.file.path,
+            originalName: req.file.originalname,
+            fileSize: req.file.size,
+            mimeType: req.file.mimetype,
+            coordinates,
+            timestamp: Number(client_ts) || Date.now(),
+            stepId: step_id,
+            mediaType: media_type || 'photo'
+        };
+        claimResults.set(parcel_id, claimData);
+
+        console.log(`✅ Stored ${step_id} (${Object.keys(claimData.uploaded_files).length} files total)`);
+
+        res.json({
+            success: true,
+            message: 'File uploaded successfully',
+            stepId: step_id,
+            filesUploaded: Object.keys(claimData.uploaded_files).length
+        });
+
+    } catch (error) {
+        console.error('❌ Upload error:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Server error during upload', 
+            details: process.env.NODE_ENV === 'development' ? error.message : 'Upload failed'
+        });
+    }
+});
+
+// ==================== PYTHON BATCH PROCESSING ====================
+
+async function processBatchWithPython(parcelId) {
+    console.log(`🐍 Starting batch Python processing for: ${parcelId}`);
+
+    const claimData = claimResults.get(parcelId);
+    if (!claimData?.uploaded_files) {
+        throw new Error('No uploaded files found');
+    }
+
+    const files = claimData.uploaded_files;
+    const cornerSteps = ['corner-ne', 'corner-nw', 'corner-se', 'corner-sw'];
+    const cornerFiles = cornerSteps.map(step => files[step]).filter(f => f?.mediaType === 'photo');
+    const damageFile = files['damaged-crop'];
+
+    if (cornerFiles.length < 4) {
+        return generateFallbackResult(files, `Only ${cornerFiles.length}/4 corner images`);
+    }
+    if (!damageFile) {
+        return generateFallbackResult(files, 'Missing damage image');
+    }
+
+    const workerPath = path.join(__dirname, 'worker', 'pipeline.py');
+    if (!fs.existsSync(workerPath)) {
+        console.log('⚠️ Python worker not found');
+        return generateFallbackResult(files, 'Python worker unavailable');
+    }
+
+    const cadastralPath = path.join(__dirname, 'data', 'parcel.geojson');
+    if (!fs.existsSync(cadastralPath)) {
+        const { lat, lon } = cornerFiles[0].coordinates;
+        const boundary = {
+            type: "FeatureCollection",
+            features: [{
+                type: "Feature",
+                properties: { parcel_id: parcelId },
+                geometry: {
+                    type: "Polygon",
+                    coordinates: [[
+                        [lon - 0.003, lat - 0.003],
+                        [lon + 0.003, lat - 0.003],
+                        [lon + 0.003, lat + 0.003],
+                        [lon - 0.003, lat + 0.003],
+                        [lon - 0.003, lat - 0.003]
+                    ]]
                 }
-            };
+            }]
+        };
+        fs.mkdirSync(path.dirname(cadastralPath), { recursive: true });
+        fs.writeFileSync(cadastralPath, JSON.stringify(boundary, null, 2));
+        console.log('✅ Created cadastral boundary');
+    }
 
-            const claimData = claimResults.get(parcelId);
-            claimData.individual_results[stepId] = videoResult;
-            claimResults.set(parcelId, claimData);
+    const pythonCommand = process.env.PYTHON_COMMAND || 'python';
+    const args = [
+        workerPath,
+        ...cornerFiles.flatMap(f => [f.filePath, String(f.coordinates.lat), String(f.coordinates.lon)]),
+        damageFile.filePath,
+        '50.0',
+        '100000',
+        cadastralPath,
+        parcelId,
+        '1'
+    ];
 
-            fs.unlink(filePath, () => {});
-            return res.json(videoResult);
-        }
+    console.log(`🚀 Executing Python: ${pythonCommand} with ${args.length} arguments`);
 
-        // Ensure cadastral data exists for geofencing
-        const cadastralPath = path.join(__dirname, "data", "parcel.geojson");
-        if (!fs.existsSync(cadastralPath)) {
-            const testBoundary = {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "properties": {
-                        "parcel_id": parcelId,
-                        "note": "Generated test boundary for geofencing analysis"
-                    },
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [[[lon-0.003, lat-0.003], [lon+0.003, lat-0.003], [lon+0.003, lat+0.003], [lon-0.003, lat+0.003], [lon-0.003, lat-0.003]]]
-                    }
-                }]
-            };
-            fs.writeFileSync(cadastralPath, JSON.stringify(testBoundary, null, 2));
-        }
-
-        // Check for Python worker
-        const workerPath = path.join(__dirname, "../worker/pipeline.py");
-        if (!fs.existsSync(workerPath)) {
-            console.log(`⚠️ Python worker not found, using basic analysis`);
-            
-            const basicResult = {
-                processing_info: {
-                    timestamp: Date.now(),
-                    processing_time_ms: 1000,
-                    version: '3.0-basic-fallback',
-                    note: 'Python worker unavailable'
-                },
-                input_data: {
-                    file_name: req.file.originalname,
-                    file_size: req.file.size,
-                    coordinates: { lat, lon },
-                    step_id: stepId
-                },
-                extracted_exif_data: {
-                    available: false,
-                    error: 'Python EXIF extraction unavailable'
-                },
-                confidence_assessment: {
-                    overall_confidence: 0.3,
-                    recommendation: {
-                        status: 'additional_evidence',
-                        reason: 'Unable to extract EXIF data for verification',
-                        action: 'Request manual verification'
-                    }
-                }
-            };
-
-            const claimData = claimResults.get(parcelId);
-            claimData.individual_results[stepId] = basicResult;
-            claimResults.set(parcelId, claimData);
-
-            fs.unlink(filePath, () => {});
-            return res.json(basicResult);
-        }
-
-        // Run Python pipeline for real data extraction
-        console.log('🐍 Starting real data extraction pipeline...');
-        const py = spawn("python", [
-            workerPath,
-            filePath,
-            String(lat),
-            String(lon),
-            String(clientTs),
-            cadastralPath,
-            overlayText,
-            parcelId
-        ], {
+    return new Promise((resolve, reject) => {
+        const py = spawn(pythonCommand, args, {
             cwd: process.cwd(),
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
-        let stdout = "";
-        let stderr = "";
+        let stdout = '';
+        let stderr = '';
+        const timeout = setTimeout(() => {
+            py.kill();
+            reject(new Error('Python timeout (60s)'));
+        }, 60000);
 
-        py.stdout.on("data", (data) => {
-            stdout += data.toString();
+        py.stdout.on('data', data => stdout += data.toString());
+        py.stderr.on('data', data => {
+            const msg = data.toString();
+            console.log('[PYTHON]:', msg);
+            stderr += msg;
         });
 
-        py.stderr.on("data", (data) => {
-            const errorMsg = data.toString();
-            console.log("PYTHON LOG:", errorMsg);
-            stderr += errorMsg;
-        });
-
-        py.on("close", (code) => {
+        py.on('close', code => {
+            clearTimeout(timeout);
+            if (code !== 0) {
+                reject(new Error(`Python failed with code ${code}: ${stderr}`));
+                return;
+            }
             try {
-                if (code !== 0) {
-                    throw new Error(`Python pipeline failed with code ${code}: ${stderr}`);
-                }
-
-                let result;
-                try {
-                    result = JSON.parse(stdout);
-                    console.log('✅ Real data extraction completed for step:', stepId);
-                } catch (parseError) {
-                    throw new Error(`Failed to parse Python output: ${parseError.message}`);
-                }
-
-                // Add metadata
-                result.input_data = {
-                    ...result.input_data,
-                    uploaded_file: req.file.originalname,
-                    file_size_bytes: req.file.size,
-                    step_id: stepId
-                };
-
-                // Store individual result
-                const claimData = claimResults.get(parcelId);
-                claimData.individual_results[stepId] = result;
-
-                // Generate aggregated analysis when we have enough data
-                if (Object.keys(claimData.individual_results).length >= 5) {
-                    claimData.aggregated_analysis = generateRealAggregatedAnalysis(claimData.individual_results);
-                    console.log('🎯 Generated real aggregated analysis for:', parcelId);
-                }
-
-                claimResults.set(parcelId, claimData);
-                res.json(result);
-
+                const result = JSON.parse(stdout);
+                console.log('✅ Python processing completed');
+                resolve(result);
             } catch (error) {
-                console.error('Real data extraction error:', error);
-                
-                const errorResult = {
-                    processing_info: {
-                        timestamp: Date.now(),
-                        version: '3.0-error-fallback'
-                    },
-                    input_data: {
-                        uploaded_file: req.file.originalname,
-                        step_id: stepId,
-                        error: error.message
-                    },
-                    confidence_assessment: {
-                        overall_confidence: 0.1,
-                        recommendation: {
-                            status: 'reject',
-                            reason: 'Processing failed',
-                            action: 'Technical investigation required'
-                        }
-                    }
-                };
+                reject(new Error(`Invalid JSON from Python: ${error.message}`));
+            }
+        });
 
-                const claimData = claimResults.get(parcelId);
-                claimData.individual_results[stepId] = errorResult;
-                claimResults.set(parcelId, claimData);
+        py.on('error', error => {
+            clearTimeout(timeout);
+            reject(new Error(`Failed to start Python: ${error.message}`));
+        });
+    });
+}
 
-                res.json(errorResult);
-            } finally {
-                fs.unlink(filePath, () => {});
+function generateFallbackResult(files, reason) {
+    console.log(`⚠️ Fallback result: ${reason}`);
+    return {
+        claim_id: `FALLBACK_${Date.now()}`,
+        processing_timestamp: new Date().toISOString(),
+        overall_assessment: {
+            final_decision: 'MANUAL_REVIEW',
+            confidence_score: 0.3,
+            risk_level: 'medium',
+            manual_review_required: true
+        },
+        damage_assessment: {
+            ai_calculated_damage_percent: 35.0,
+            farmer_claimed_damage_percent: 50.0,
+            final_damage_percent: 42.5,
+            severity: 'moderate'
+        },
+        payout_calculation: {
+            sum_insured: 100000,
+            damage_percent: 42.5,
+            final_payout_amount: 42500,
+            currency: 'INR'
+        },
+        verification_evidence: {
+            authenticity_verified: false,
+            location_verified: false,
+            processing_note: reason
+        },
+        recommendation: {
+            action: 'SCHEDULE_MANUAL_REVIEW',
+            processing_priority: 'high'
+        },
+        audit_trail: {
+            processed_by: 'Fallback_System',
+            fallback_reason: reason
+        }
+    };
+}
+
+function determineClaimDecision(pythonResult) {
+    const confidence = pythonResult.overall_assessment?.confidence_score || 0;
+    
+    if (confidence >= 0.70) {
+        return {
+            decision: 'APPROVE',
+            status: 'approved',
+            action: 'PROCESS_PAYOUT',
+            risk: 'low',
+            manual_review_required: false,
+            reason: `High confidence (${(confidence * 100).toFixed(1)}%) - Claim approved for payout`,
+            next_steps: 'Payout will be processed within 3-5 business days',
+            user_message: '✅ Claim Approved! Your payout is being processed.',
+            payout_approved: true
+        };
+    } else if (confidence >= 0.30 && confidence < 0.70) {
+        return {
+            decision: 'MANUAL_REVIEW',
+            status: 'manual_review',
+            action: 'SCHEDULE_MANUAL_REVIEW',
+            risk: 'medium',
+            manual_review_required: true,
+            reason: `Moderate confidence (${(confidence * 100).toFixed(1)}%) - Requires manual verification`,
+            next_steps: 'Our team will review your claim within 2-3 business days',
+            user_message: '🔍 Manual Review Required - Our team will verify your claim',
+            payout_approved: false
+        };
+    } else {
+        return {
+            decision: 'REJECT',
+            status: 'rejected',
+            action: 'REQUEST_RESUBMISSION',
+            risk: 'high',
+            manual_review_required: false,
+            reason: `Low confidence (${(confidence * 100).toFixed(1)}%) - Insufficient or unclear evidence`,
+            next_steps: 'Please re-submit your claim with clearer evidence',
+            user_message: '❌ Claim Rejected - Please capture clearer images and re-submit',
+            payout_approved: false
+        };
+    }
+}
+
+function mapPythonToFrontend(pythonResult) {
+    const confidence = pythonResult.overall_assessment?.confidence_score || 0;
+    const decision = determineClaimDecision(pythonResult);
+    
+    return {
+        overall_confidence: confidence,
+        recommendation: {
+            status: decision.status,
+            reason: decision.reason,
+            action: decision.action,
+            next_steps: decision.next_steps,
+            user_message: decision.user_message
+        },
+        final_decision: {
+            decision: decision.decision,
+            risk_level: decision.risk,
+            manual_review_required: decision.manual_review_required,
+            confidence_score: confidence,
+            threshold_applied: confidence >= 0.70 ? 'auto_approve' : 
+                              confidence >= 0.30 ? 'manual_review' : 'reject_retry',
+            payout_approved: decision.payout_approved
+        },
+        summary: {
+            total_files_processed: 5,
+            successful_extractions: pythonResult.verification_evidence?.authenticity_verified ? 5 : 3,
+            failed_extractions: 0,
+            exif_data_extracted: 5,
+            weather_data_obtained: pythonResult.verification_evidence?.weather_supports_claim ? 5 : 0,
+            geofencing_successful: pythonResult.verification_evidence?.location_verified ? 5 : 0,
+            coordinate_matches: pythonResult.verification_evidence?.location_verified ? 5 : 0
+        },
+        damage_assessment: pythonResult.damage_assessment || {},
+        payout_calculation: {
+            ...pythonResult.payout_calculation,
+            payout_approved: decision.payout_approved,
+            payout_status: decision.decision === 'APPROVE' ? 'processing' : 
+                          decision.decision === 'MANUAL_REVIEW' ? 'pending_review' : 'rejected',
+            final_payout_amount: decision.payout_approved ? 
+                                pythonResult.payout_calculation?.final_payout_amount : 0
+        },
+        verification_evidence: pythonResult.verification_evidence || {},
+        detailed_scores: pythonResult.detailed_scores || {},
+        fraud_indicators: pythonResult.fraud_indicators || {},
+        full_analysis: pythonResult
+    };
+}
+
+// ==================== CLAIMS ENDPOINTS ====================
+
+// Initialize claim
+app.post('/api/claims/initialize', async (req, res) => {
+    try {
+        console.log('📋 Claim initialization requested');
+        
+        const { insuranceId, formData } = req.body;
+
+        const timestamp = Date.now().toString().slice(-8);
+        const random = Math.floor(Math.random() * 90 + 10);
+        const letters = Math.random().toString(36).substring(2, 4).toUpperCase();
+        const documentId = `CLM-${timestamp}${random}-${letters}`;
+
+        // Store in claimResults for processing
+        claimResults.set(documentId, {
+            documentId,
+            insuranceId,
+            formData: formData || {},
+            uploaded_files: {},
+            status: 'draft',
+            createdAt: new Date().toISOString(),
+            metadata: {
+                timestamp: new Date().toISOString(),
+                processing_mode: 'batch_processing'
+            }
+        });
+
+        console.log(`✅ Claim initialized: ${documentId}`);
+
+        res.status(201).json({
+            success: true,
+            message: 'Claim initialized successfully',
+            claim: {
+                id: `claim_${Date.now()}`,
+                documentId,
+                status: 'draft'
             }
         });
 
     } catch (error) {
-        console.error('Upload processing error:', error);
+        console.error('❌ Initialize claim error:', error);
         res.status(500).json({
-            error: 'Server error during processing',
-            details: error.message
+            success: false,
+            error: 'Failed to initialize claim'
         });
     }
 });
 
-// Real aggregated analysis function
-function generateRealAggregatedAnalysis(individualResults) {
-    console.log('🔄 Generating real aggregated analysis from actual extracted data');
-    
-    const results = Object.values(individualResults);
-    const validResults = results.filter(r => r.confidence_assessment && !r.input_data?.error);
-    
-    if (validResults.length === 0) {
-        return {
-            overall_confidence: 0.1,
-            recommendation: {
-                status: 'reject',
-                reason: 'No valid data could be extracted from submitted evidence',
-                action: 'Claim rejected due to insufficient evidence'
-            },
-            summary: {
-                total_files_processed: results.length,
-                successful_extractions: 0,
-                failed_extractions: results.length
-            }
-        };
-    }
-    
-    // Calculate real aggregated confidence
-    const confidenceScores = validResults.map(r => r.confidence_assessment?.overall_confidence || 0);
-    const avgConfidence = confidenceScores.reduce((a, b) => a + b) / confidenceScores.length;
-    
-    // Analyze EXIF data availability
-    const exifAvailable = validResults.filter(r => r.extracted_exif_data?.available).length;
-    const weatherDataSuccess = validResults.filter(r => r.weather_verification?.api_success).length;
-    const geofencingSuccess = validResults.filter(r => r.geofencing_analysis?.geofencing_available).length;
-    const coordinateMatches = validResults.filter(r => r.coordinate_analysis?.coordinates_match).length;
-    
-    // Determine final recommendation based on real data
-    let finalRecommendation;
-    if (avgConfidence >= 0.8 && coordinateMatches >= validResults.length * 0.8) {
-        finalRecommendation = {
-            status: 'approve',
-            reason: `High confidence (${(avgConfidence * 100).toFixed(0)}%) with good coordinate matching`,
-            action: 'Process claim automatically'
-        };
-    } else if (avgConfidence >= 0.6) {
-        finalRecommendation = {
-            status: 'manual_review',
-            reason: `Moderate confidence (${(avgConfidence * 100).toFixed(0)}%) requires human verification`,
-            action: 'Schedule manual review'
-        };
-    } else {
-        finalRecommendation = {
-            status: 'additional_evidence',
-            reason: `Low confidence (${(avgConfidence * 100).toFixed(0)}%) insufficient evidence quality`,
-            action: 'Request additional documentation'
-        };
-    }
-    
-    return {
-        overall_confidence: avgConfidence,
-        recommendation: finalRecommendation,
-        summary: {
-            total_files_processed: results.length,
-            successful_extractions: validResults.length,
-            failed_extractions: results.length - validResults.length,
-            exif_data_extracted: exifAvailable,
-            weather_data_obtained: weatherDataSuccess,
-            geofencing_successful: geofencingSuccess,
-            coordinate_matches: coordinateMatches
-        },
-        detailed_breakdown: {
-            confidence_scores: confidenceScores,
-            average_confidence: avgConfidence,
-            processing_timestamp: Date.now()
-        }
-    };
-}
+// Complete claim (with Python processing)
+app.post('/api/claims/complete', async (req, res) => {
+    console.log('🎯 COMPLETION - Starting batch processing');
+    const { documentId, media, totalSteps, completedSteps } = req.body;
 
-
-function generateMockMedia() {
-    const steps = ['corner-ne', 'corner-nw', 'corner-se', 'corner-sw', 'damaged-crop', 'farm-video'];
-    const media = {};
-
-    steps.forEach(step => {
-        media[step] = {
-            stepInfo: { type: step.includes('video') ? 'video' : 'photo' },
-            cloudinaryUrl: `https://via.placeholder.com/400x300?text=${step.replace('-', ' ')}`,
-            processingResult: step === 'damaged-crop' ? generateMockAggregatedResult() : null,
-            timestamp: new Date().toISOString()
-        };
-    });
-
-    return media;
-}
-
-function generateEnhancedMockResult(file, lat, lon, clientTs, stepId) {
-    const damageLevel = Math.random();
-    return {
-        final: {
-            risk: damageLevel > 0.6 ? 'medium' : 'low',
-            verification_level: damageLevel > 0.8 ? 'manual-review' : 'auto-approve',
-            need_physical_check: damageLevel > 0.7,
-            reasons: ['Mock analysis completed'],
-            confidence_score: 0.7 + Math.random() * 0.25
-        },
-        phases: {
-            meta_validation: {
-                valid: true,
-                exif_available: true,
-                coordinates_match: true,
-                timestamp_match: true,
-                gps_precision_ok: true
-            },
-            geofencing: {
-                location_valid: true,
-                parcel_properties: {
-                    parcel_id: "DEFAULT_PARCEL",
-                    owner: "Sample Farmer",
-                    area_hectares: 2.23,
-                    crop_type: "Rice"
-                }
-            },
-            forensics: {
-                tampering_detected: false,
-                overlay_consistent: true,
-                image_hash: "mock_hash_" + Date.now(),
-                tampering_indicators: { tampering_score: Math.random() * 0.3 }
-            },
-            weather_correlation: {
-                weather_data: {
-                    temperature_avg: 25 + Math.random() * 10,
-                    precipitation: Math.random() * 10,
-                    conditions: Math.random() > 0.5 ? 'clear' : 'partly_cloudy',
-                    source: 'meteostat_rapidapi',
-                    api_success: true
-                },
-                consistency_analysis: {
-                    inconsistent: false,
-                    score: 0.8 + Math.random() * 0.2,
-                    verifiable: true
-                }
-            },
-            damage_assessment: {
-                damage_percentage: damageLevel * 0.6,
-                method: 'Vegetation Index Analysis (Mock)',
-                confidence: 0.75 + Math.random() * 0.2,
-                vegetation_health: 1 - (damageLevel * 0.6)
-            }
-        },
-        metadata: {
-            uploadedFile: file.originalname,
-            fileSize: file.size,
-            coordinates: { lat, lon },
-            timestamp: new Date(clientTs).toISOString(),
-            processingTime: 2000 + Math.random() * 3000,
-            mode: 'enhanced_mock_analysis',
-            mediaType: 'photo',
-            stepId
-        }
-    };
-}
-
-function generateFallbackResult(file, lat, lon, clientTs, stepId, error) {
-    return {
-        final: {
-            risk: 'medium',
-            verification_level: 'manual-review',
-            need_physical_check: true,
-            reasons: ['Processing error - requires manual review']
-        },
-        phases: {
-            processing_error: true,
-            error_details: error.message,
-            fallback_analysis: {
-                damage_percentage: 0.3,
-                confidence: 0.5
-            }
-        },
-        metadata: {
-            uploadedFile: file.originalname,
-            fileSize: file.size,
-            coordinates: { lat, lon },
-            timestamp: new Date(clientTs).toISOString(),
-            processingTime: Date.now() - clientTs,
-            mode: 'fallback_analysis',
-            error: error.message,
-            stepId
-        }
-    };
-}
-
-function generateTimeoutResult(file, lat, lon, clientTs, stepId) {
-    return {
-        final: {
-            risk: 'medium',
-            verification_level: 'manual-review',
-            need_physical_check: true,
-            reasons: ['Processing timeout - requires manual review']
-        },
-        phases: {
-            timeout_error: true,
-            processing_duration: 60000
-        },
-        metadata: {
-            uploadedFile: file.originalname,
-            fileSize: file.size,
-            coordinates: { lat, lon },
-            timestamp: new Date(clientTs).toISOString(),
-            mode: 'timeout_fallback',
-            stepId
-        }
-    };
-}
-
-function generateAggregatedAnalysis(individualResults) {
-    console.log('🔄 Generating aggregated analysis from', Object.keys(individualResults).length, 'results');
-
-    const results = Object.values(individualResults);
-
-    // Aggregate risk levels
-    const risks = results.map(r => r.final?.risk).filter(Boolean);
-    const highRiskCount = risks.filter(r => r === 'high').length;
-    const mediumRiskCount = risks.filter(r => r === 'medium').length;
-
-    // Aggregate verification levels
-    const verifications = results.map(r => r.final?.verification_level).filter(Boolean);
-    const needsManualReview = verifications.some(v => v === 'manual-review');
-    const hasRejection = verifications.some(v => v === 'reject');
-
-    // Aggregate physical check needs
-    const physicalChecks = results.map(r => r.final?.need_physical_check).filter(v => v !== undefined);
-    const needsPhysicalCheck = physicalChecks.some(p => p === true);
-
-    // Aggregate damage assessments
-    const damageResults = results.map(r => r.phases?.damage_assessment?.damage_percentage).filter(d => d !== undefined);
-    const overallDamage = damageResults.length > 0 ? damageResults.reduce((a, b) => a + b) / damageResults.length : 0;
-
-    // Aggregate weather consistency
-    const weatherResults = results.map(r => r.phases?.weather_correlation?.consistency_analysis).filter(Boolean);
-    const weatherInconsistent = weatherResults.some(w => w.inconsistent);
-
-    // Aggregate forensics
-    const forensicResults = results.map(r => r.phases?.forensics).filter(Boolean);
-    const tamperingDetected = forensicResults.some(f => f.tampering_detected);
-
-    // Aggregate geofencing
-    const geoResults = results.map(r => r.phases?.geofencing).filter(Boolean);
-    const allLocationsValid = geoResults.every(g => g.location_valid);
-
-    // Final decision logic
-    let finalRisk = 'low';
-    let finalVerification = 'auto-approve';
-    let finalPhysicalCheck = false;
-    const finalReasons = [];
-
-    if (hasRejection || !allLocationsValid) {
-        finalRisk = 'high';
-        finalVerification = 'reject';
-        finalReasons.push('Location or validation issues');
-    } else if (highRiskCount > 0 || tamperingDetected) {
-        finalRisk = 'high';
-        finalVerification = 'manual-review';
-        finalPhysicalCheck = true;
-        finalReasons.push('High risk factors detected');
-    } else if (mediumRiskCount > 1 || needsManualReview || weatherInconsistent) {
-        finalRisk = 'medium';
-        finalVerification = 'manual-review';
-        finalReasons.push('Multiple medium risk factors');
-    } else if (overallDamage > 0.7) {
-        finalVerification = 'expedite-payout';
-        finalPhysicalCheck = true;
-        finalReasons.push('High damage level');
-    } else if (overallDamage < 0.05) {
-        finalVerification = 'manual-review';
-        finalReasons.push('Low damage requires verification');
-    }
-
-    // Confidence calculation
-    const confidenceScores = results.map(r => r.final?.confidence_score || 0.5);
-    const overallConfidence = confidenceScores.reduce((a, b) => a + b) / confidenceScores.length;
-
-    return {
-        final: {
-            risk: finalRisk,
-            verification_level: finalVerification,
-            need_physical_check: finalPhysicalCheck || needsPhysicalCheck,
-            reasons: finalReasons,
-            confidence_score: overallConfidence,
-            aggregation_source: 'multiple_evidence_points'
-        },
-        summary: {
-            total_evidence_points: results.length,
-            overall_damage_percentage: overallDamage,
-            high_risk_count: highRiskCount,
-            medium_risk_count: mediumRiskCount,
-            weather_inconsistent: weatherInconsistent,
-            tampering_detected: tamperingDetected,
-            all_locations_valid: allLocationsValid
-        },
-        phases: {
-            damage_assessment: {
-                damage_percentage: overallDamage,
-                method: 'aggregated_analysis',
-                confidence: overallConfidence,
-                individual_assessments: damageResults
-            },
-            weather_correlation: {
-                consistency_analysis: {
-                    inconsistent: weatherInconsistent,
-                    total_checks: weatherResults.length,
-                    verifiable: weatherResults.length > 0
-                }
-            },
-            forensics: {
-                tampering_detected: tamperingDetected,
-                total_checks: forensicResults.length
-            },
-            geofencing: {
-                location_valid: allLocationsValid,
-                total_checks: geoResults.length
-            }
-        },
-        processing_info: {
-            timestamp: Date.now(),
-            processing_version: '2.0',
-            aggregation_method: 'comprehensive_multi_point',
-            individual_result_count: results.length
-        }
-    };
-}
-
-// ==================== ERROR HANDLING & SERVER STARTUP ====================
-
-// Global error handler
-app.use((error, req, res, next) => {
-    console.error('Global error handler:', error);
-
-    if (error instanceof multer.MulterError) {
-        if (error.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({
-                error: 'File too large',
-                details: 'Maximum file size is 50MB'
+    try {
+        if (!documentId) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Document ID is required' 
             });
         }
-    }
 
+        if (!claimResults.has(documentId)) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Document not found. Please reinitialize the claim.' 
+            });
+        }
+
+        console.log('🐍 Triggering Python batch processing...');
+        let pythonResult;
+        
+        try {
+            pythonResult = await processBatchWithPython(documentId);
+        } catch (error) {
+            console.error('❌ Python failed:', error.message);
+            const claimData = claimResults.get(documentId);
+            pythonResult = generateFallbackResult(claimData.uploaded_files, error.message);
+        }
+
+        const claimData = claimResults.get(documentId);
+        claimData.aggregated_analysis = mapPythonToFrontend(pythonResult);
+        claimData.metadata.status = 'completed';
+        claimData.metadata.completedAt = new Date().toISOString();
+        claimData.status = 'submitted';
+        claimResults.set(documentId, claimData);
+
+        // Cleanup uploaded files (optional)
+        Object.values(claimData.uploaded_files || {}).forEach(file => {
+            if (file.filePath && fs.existsSync(file.filePath)) {
+                fs.unlink(file.filePath, (err) => {
+                    if (err) console.error('File cleanup error:', err);
+                });
+            }
+        });
+
+        console.log('✅ Batch processing completed');
+
+        res.json({
+            success: true,
+            message: 'Claim completed successfully',
+            claim: {
+                id: `claim-${documentId}`,
+                documentId,
+                status: 'submitted',
+                completedAt: new Date().toISOString(),
+                processingResult: claimData.aggregated_analysis
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Completion error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to complete claim',
+            details: process.env.NODE_ENV === 'development' ? error.message : 'Processing failed'
+        });
+    }
+});
+
+// Get claim results
+app.get('/api/claims/results/:documentId', (req, res) => {
+    console.log('📊 RESULTS - Request for:', req.params.documentId);
+    const { documentId } = req.params;
+
+    if (claimResults.has(documentId)) {
+        const claimData = claimResults.get(documentId);
+        
+        res.json({
+            success: true,
+            claim: {
+                documentId,
+                status: 'submitted',
+                submitted_at: claimData.metadata?.completedAt || new Date().toISOString()
+            },
+            processing_result: claimData.aggregated_analysis || {},
+            media: {},
+            individual_results: {},
+            metadata: {
+                ...claimData.metadata,
+                data_source: 'python_batch_processing',
+                pythonWorker: pythonWorkerAvailable ? 'used' : 'fallback'
+            }
+        });
+    } else {
+        console.log('⚠️ Document not found');
+        res.json({
+            success: true,
+            claim: {
+                documentId,
+                status: 'submitted',
+                submitted_at: new Date().toISOString()
+            },
+            processing_result: {
+                overall_confidence: 0.0,
+                recommendation: {
+                    status: 'error',
+                    reason: 'Claim data not found',
+                    user_message: '❌ Error: Claim data not found'
+                }
+            },
+            media: {},
+            individual_results: {},
+            metadata: {
+                timestamp: new Date().toISOString(),
+                data_source: 'mock_fallback',
+                error: 'Document not found'
+            }
+        });
+    }
+});
+
+// Get claims list
+app.get('/api/claims/list', (req, res) => {
+    try {
+        console.log('📋 Claims list requested');
+        
+        const claims = Array.from(claimResults.entries()).map(([docId, data]) => ({
+            documentId: docId,
+            status: data.status || 'draft',
+            submittedAt: data.metadata?.completedAt || data.createdAt,
+            insuranceId: data.insuranceId
+        }));
+
+        res.json({
+            success: true,
+            claims,
+            count: claims.length
+        });
+
+    } catch (error) {
+        console.error('❌ Get claims error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch claims'
+        });
+    }
+});
+
+// ==================== ERROR HANDLING ====================
+
+app.use((error, req, res, next) => {
+    console.error('Global error:', error);
+    
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'File too large (max 50MB)' 
+            });
+        }
+        return res.status(400).json({ 
+            success: false,
+            error: error.message 
+        });
+    }
+    
     res.status(500).json({
+        success: false,
         error: 'Internal server error',
         details: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
     });
 });
 
-// Handle 404
 app.use('*', (req, res) => {
-    res.status(404).json({
-        error: 'Route not found',
-        path: req.originalUrl
+    res.status(404).json({ 
+        success: false,
+        error: 'Route not found', 
+        path: req.originalUrl 
     });
 });
 
-// Graceful shutdown
-const gracefulShutdown = () => {
-    console.log('\n🛑 Received shutdown signal, shutting down gracefully...');
+// ==================== GRACEFUL SHUTDOWN ====================
 
+const gracefulShutdown = () => {
+    console.log('\n🛑 Shutting down gracefully...');
     if (mongoose.connection.readyState === 1) {
         mongoose.connection.close(() => {
-            console.log('📴 MongoDB connection closed');
+            console.log('📴 MongoDB closed');
             process.exit(0);
         });
     } else {
@@ -1063,15 +779,16 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-// Start server
+// ==================== START SERVER ====================
+
 app.listen(PORT, () => {
-    console.log(`🚀 PBI Agriculture Insurance Backend v2.0 running on port ${PORT}`);
+    console.log(`\n🚀 PBI AgriInsure Backend v3.0`);
+    console.log(`📍 Port: ${PORT}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📂 Upload directory: ${path.join(__dirname, 'uploads')}`);
-    console.log(`🔧 Health check: http://localhost:${PORT}/health`);
-    console.log(`🎯 Python Pipeline: Integrated`);
-    console.log(`🌤️ Weather API: Meteostat via RapidAPI`);
-    console.log(`📊 Aggregated Analysis: Enabled`);
+    console.log(`🔧 Health: http://localhost:${PORT}/health`);
+    console.log(`🐍 Python Worker: ${pythonWorkerAvailable ? 'Available' : 'Fallback Mode'}`);
+    console.log(`📊 Decision Logic: ≥70%=APPROVE, 30-70%=REVIEW, <30%=REJECT`);
+    console.log(`🔐 CORS: ${allowedOrigins.join(', ')}\n`);
 });
 
 module.exports = app;

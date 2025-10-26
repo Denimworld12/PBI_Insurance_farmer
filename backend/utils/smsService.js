@@ -1,20 +1,37 @@
 const twilio = require('twilio');
 
-// Force development mode for now
-const FORCE_DEVELOPMENT_MODE = true;
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 let twilioClient = null;
 
 const initializeTwilio = () => {
-  if (FORCE_DEVELOPMENT_MODE) {
-    console.log('📱 SMS Service: Using development mode (Twilio disabled)');
+  // Use development mode if in dev environment OR if Twilio not configured
+  if (isDevelopment) {
+    console.log('📱 SMS Service: Development mode (Twilio disabled)');
     return null;
   }
   
-  if (!twilioClient && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    console.log('✅ Twilio SMS service initialized');
+  // Check if Twilio credentials exist
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
+    console.log('⚠️ Twilio credentials not found, using development mode');
+    return null;
   }
+
+  // Initialize Twilio client
+  if (!twilioClient) {
+    try {
+      twilioClient = twilio(
+        process.env.TWILIO_ACCOUNT_SID, 
+        process.env.TWILIO_AUTH_TOKEN
+      );
+      console.log('✅ Twilio SMS service initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize Twilio:', error.message);
+      return null;
+    }
+  }
+  
   return twilioClient;
 };
 
@@ -27,8 +44,8 @@ const sendSMS = async (phoneNumber, message) => {
 
     const formattedNumber = `+91${phoneNumber}`;
 
-    // FORCE DEVELOPMENT MODE
-    if (FORCE_DEVELOPMENT_MODE || process.env.NODE_ENV === 'development') {
+    // Development Mode
+    if (isDevelopment || !initializeTwilio()) {
       console.log('📱 SMS Service (Development Mode)');
       console.log(`📞 To: ${formattedNumber}`);
       console.log(`💬 Message: ${message}`);
@@ -36,21 +53,21 @@ const sendSMS = async (phoneNumber, message) => {
       
       return {
         success: true,
-        messageId: 'dev_' + Date.now(),
+        messageId: `dev_${Date.now()}`,
         status: 'sent',
         to: formattedNumber,
-        message: 'SMS sent in development mode'
+        message: 'SMS sent in development mode',
+        mode: 'development'
       };
     }
 
-    // Try to initialize Twilio
-    const client = initializeTwilio();
+    // Production Mode - Send via Twilio
+    const client = twilioClient;
     
     if (!client) {
-      throw new Error('Twilio not configured');
+      throw new Error('Twilio client not initialized');
     }
 
-    // Send SMS via Twilio
     const result = await client.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
@@ -64,25 +81,36 @@ const sendSMS = async (phoneNumber, message) => {
       messageId: result.sid,
       status: result.status,
       to: result.to,
-      message: 'SMS sent successfully'
+      message: 'SMS sent successfully',
+      mode: 'production'
     };
 
   } catch (error) {
     console.error('❌ SMS sending failed:', error.message);
     
-    // Fallback to development mode on error
-    console.log('📱 Falling back to development mode');
+    // Fallback to development mode on error (only in dev)
+    if (isDevelopment) {
+      console.log('📱 Falling back to development mode');
+      return {
+        success: true,
+        messageId: `dev_fallback_${Date.now()}`,
+        status: 'sent',
+        to: `+91${phoneNumber}`,
+        message: 'SMS sent in development mode (fallback)',
+        mode: 'development_fallback'
+      };
+    }
+    
+    // In production, return actual error
     return {
-      success: true, // Return success for development
-      messageId: 'dev_fallback_' + Date.now(),
-      status: 'sent',
-      to: `+91${phoneNumber}`,
-      message: 'SMS sent in development mode (fallback)'
+      success: false,
+      error: error.message,
+      message: 'Failed to send SMS',
+      mode: 'production_error'
     };
   }
 };
 
-// Rest of the functions remain the same...
 const sendOTP = async (phoneNumber, otp) => {
   const message = `Your PBI AgriInsure verification code is: ${otp}. Valid for 10 minutes. Do not share this code with anyone.`;
   return await sendSMS(phoneNumber, message);
@@ -107,6 +135,9 @@ const sendClaimNotification = async (phoneNumber, documentId, status) => {
     case 'field-verification':
       message = `Your crop insurance claim ${documentId} requires field verification. Our agent will contact you soon.`;
       break;
+    case 'manual-review':
+      message = `Your crop insurance claim ${documentId} is under manual review. We will update you within 2-3 business days.`;
+      break;
     default:
       message = `Your crop insurance claim ${documentId} status has been updated to: ${status}`;
   }
@@ -125,13 +156,23 @@ const isValidPhoneNumber = (phoneNumber) => {
 };
 
 const getServiceStatus = () => {
+  const hasCredentials = !!(
+    process.env.TWILIO_ACCOUNT_SID && 
+    process.env.TWILIO_AUTH_TOKEN && 
+    process.env.TWILIO_PHONE_NUMBER
+  );
+
   return {
-    isConfigured: FORCE_DEVELOPMENT_MODE ? false : !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
-    mode: FORCE_DEVELOPMENT_MODE ? 'development (forced)' : (process.env.NODE_ENV || 'development'),
+    isConfigured: hasCredentials,
+    mode: isDevelopment ? 'development' : 'production',
     provider: 'Twilio',
-    status: FORCE_DEVELOPMENT_MODE ? 'development_mode' : 'active'
+    status: hasCredentials ? 'active' : 'development_mode',
+    environment: process.env.NODE_ENV || 'development'
   };
 };
+
+// Initialize on module load
+initializeTwilio();
 
 module.exports = {
   sendSMS,
@@ -139,5 +180,6 @@ module.exports = {
   sendClaimNotification,
   sendNotification,
   isValidPhoneNumber,
-  getServiceStatus
+  getServiceStatus,
+  initializeTwilio
 };

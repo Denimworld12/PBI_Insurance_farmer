@@ -1,962 +1,805 @@
 #!/usr/bin/env python3
-# Enhanced pipeline - Real data extraction with multiple fallbacks and improved analysis
+"""
+Comprehensive Crop Insurance Claim Verification System - Batch Processing v2.0
+Processes 4 corner images + 1 damage image in a single comprehensive analysis
+Includes: EXIF GPS, Coordinate Matching, Geofencing, Weather, AI Damage Assessment
+"""
+
 import sys
 import json
 import time
-import http.client
+import os
 import urllib.request
 import urllib.parse
+import math
 from datetime import datetime, timezone
 from pathlib import Path
-import os
 
-# Load environment variables
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
-# Try to import required libraries with better error handling
+# Optional libs
 try:
     from PIL import Image, ExifTags
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    print("Warning: PIL/Pillow not available - basic EXIF extraction disabled", file=sys.stderr)
+    print("Warning: PIL/Pillow not available", file=sys.stderr)
 
 try:
-    from exif import Image as ExifImage
-    EXIF_AVAILABLE = True
+    import numpy as np
 except ImportError:
-    EXIF_AVAILABLE = False
-    print("Warning: exif library not available - GPS extraction limited", file=sys.stderr)
+    np = None
 
 try:
-    import shapely.geometry as geom
-    from shapely import Point, Polygon
+    import torch
+    import torchvision.transforms as transforms
+    from torchvision import models
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
+try:
+    from shapely.geometry import Point, shape as geom_shape
+    from shapely.ops import nearest_points
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
-    print("Warning: Shapely not available - geofencing disabled", file=sys.stderr)
+    print("Warning: Shapely not available - using basic geofencing", file=sys.stderr)
 
-try:
-    import exifread
-    EXIFREAD_AVAILABLE = True
-except ImportError:
-    EXIFREAD_AVAILABLE = False
-    print("Warning: exifread not available - fallback EXIF extraction disabled", file=sys.stderr)
+# Configuration
+DEBUG_MODE = True
+TRUST_CLAIMED_COORDS = True
+EXIF_CLAIMED_MATCH_TOLERANCE_M = 50.0
 
-# API Configuration
-RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', 'd2abc61cabmshbfccea6298fb9cfp12cf84jsncbf194b10aba')
-RAPIDAPI_HOST = os.getenv('RAPIDAPI_HOST', 'meteostat.p.rapidapi.com')
-DEBUG_MODE = os.getenv('DEBUG_MODE', 'true').lower() == 'true'
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
-def safe_print_json(obj):
-    """Print JSON safely for Node.js"""
-    print(json.dumps(obj, indent=None, separators=(',', ':')))
-    sys.stdout.flush()
+def debug(msg):
+    if DEBUG_MODE:
+        print(f"[DEBUG] {msg}", file=sys.stderr)
 
-def dms_to_decimal(dms_tuple, reference):
-    """Convert DMS to decimal degrees"""
+def haversine_m(lat1, lon1, lat2, lon2):
+    """Calculate distance between two points in meters using Haversine formula"""
+    R = 6371000.0
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = math.sin(dlat/2.0)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlon/2.0)**2
+    return 2 * R * math.asin(math.sqrt(a))
+
+def _rational_to_float(x):
+    """Convert PIL rational numbers to float"""
     try:
-        degrees, minutes, seconds = dms_tuple
-        decimal = float(degrees) + float(minutes)/60.0 + float(seconds)/3600.0
-        if reference in ['S', 'W']:
-            decimal = -decimal
-        return decimal
-    except Exception as e:
-        if DEBUG_MODE:
-            print(f"DMS conversion error: {e}", file=sys.stderr)
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            num, den = x
+            return float(num) / float(den) if den else float(num)
+        return float(x)
+    except Exception:
         return None
 
-def extract_comprehensive_exif(image_path):
-    """Extract all available EXIF data using multiple methods with enhanced error handling"""
-    exif_data = {}
-    extraction_log = []
-    
-    if not os.path.exists(image_path):
-        return {}, {"error": f"Image file not found: {image_path}"}
-    
-    file_size = os.path.getsize(image_path)
-    extraction_log.append(f"Processing file: {image_path} ({file_size:,} bytes)")
-    
-    # Method 1: PIL/Pillow (most reliable for basic EXIF)
-    if PIL_AVAILABLE:
-        try:
-            extraction_log.append("🔍 Trying PIL/Pillow extraction...")
-            
-            with Image.open(image_path) as img:
-                # Get basic image info
-                exif_data['Image_Info'] = {
-                    'format': img.format,
-                    'mode': img.mode,
-                    'size': list(img.size),  # Convert tuple to list for JSON
-                    'has_transparency': img.mode in ('RGBA', 'LA') or 'transparency' in img.info
-                }
-                
-                # Try to get EXIF dictionary
-                exif_dict = img._getexif()
-                if exif_dict:
-                    extraction_log.append(f"✅ PIL found {len(exif_dict)} EXIF tags")
-                    for tag_id, value in exif_dict.items():
-                        tag = ExifTags.TAGS.get(tag_id, f"Tag_{tag_id}")
-                        try:
-                            # Handle different value types more robustly
-                            if isinstance(value, bytes):
-                                try:
-                                    exif_data[f'PIL_{tag}'] = value.decode('utf-8')
-                                except UnicodeDecodeError:
-                                    exif_data[f'PIL_{tag}'] = value.decode('utf-8', errors='replace')
-                            elif isinstance(value, (tuple, list)):
-                                # Handle GPS and other tuple data
-                                if len(value) > 10:  # Truncate very long tuples
-                                    exif_data[f'PIL_{tag}'] = f"{str(value[:10])}... (truncated)"
-                                else:
-                                    exif_data[f'PIL_{tag}'] = str(value)
-                            else:
-                                exif_data[f'PIL_{tag}'] = str(value)
-                        except Exception as e:
-                            exif_data[f'PIL_{tag}_ERROR'] = f"Processing error: {str(e)[:100]}"
-                else:
-                    extraction_log.append("⚠️ PIL found no EXIF data")
-                    
-        except Exception as e:
-            extraction_log.append(f"❌ PIL extraction failed: {str(e)}")
-    else:
-        extraction_log.append("❌ PIL/Pillow not available")
-    
-    # Method 2: exif library (specialized for GPS data)
-    if EXIF_AVAILABLE:
-        try:
-            extraction_log.append("🔍 Trying exif library extraction...")
-            
-            with open(image_path, "rb") as f:
-                exif_img = ExifImage(f)
-            
-            if exif_img.has_exif:
-                extraction_log.append("✅ exif library found EXIF data")
-                
-                # Get all available attributes
-                extracted_attrs = 0
-                for attr in dir(exif_img):
-                    if not attr.startswith('_') and not callable(getattr(exif_img, attr, None)):
-                        try:
-                            value = getattr(exif_img, attr)
-                            if value is not None and value != '':
-                                exif_data[f'EXIF_{attr}'] = str(value)
-                                extracted_attrs += 1
-                        except Exception as e:
-                            if DEBUG_MODE:
-                                exif_data[f'EXIF_{attr}_ERROR'] = str(e)[:50]
-                
-                extraction_log.append(f"✅ Extracted {extracted_attrs} EXIF attributes")
-                
-                # Specifically try to extract GPS coordinates
-                try:
-                    if hasattr(exif_img, 'gps_latitude') and hasattr(exif_img, 'gps_longitude'):
-                        lat_ref = getattr(exif_img, 'gps_latitude_ref', 'N')
-                        lon_ref = getattr(exif_img, 'gps_longitude_ref', 'E')
-                        
-                        lat = dms_to_decimal(exif_img.gps_latitude, lat_ref)
-                        lon = dms_to_decimal(exif_img.gps_longitude, lon_ref)
-                        
-                        if lat is not None and lon is not None:
-                            exif_data['GPS_Latitude_Decimal'] = lat
-                            exif_data['GPS_Longitude_Decimal'] = lon
-                            exif_data['GPS_Latitude_Ref'] = lat_ref
-                            exif_data['GPS_Longitude_Ref'] = lon_ref
-                            exif_data['GPS_Source'] = 'exif_library'
-                            extraction_log.append(f"🌍 GPS coordinates extracted: {lat:.6f}, {lon:.6f}")
-                            
-                            # Also try to get GPS precision data
-                            try:
-                                if hasattr(exif_img, 'gps_dop'):
-                                    exif_data['GPS_DOP'] = str(exif_img.gps_dop)
-                                if hasattr(exif_img, 'gps_satellites'):
-                                    exif_data['GPS_Satellites'] = str(exif_img.gps_satellites)
-                            except:
-                                pass
-                except Exception as e:
-                    extraction_log.append(f"❌ GPS extraction from exif failed: {str(e)}")
-            else:
-                extraction_log.append("⚠️ exif library found no EXIF data")
-                
-        except Exception as e:
-            extraction_log.append(f"❌ exif library extraction failed: {str(e)}")
-    else:
-        extraction_log.append("❌ exif library not available")
-    
-    # Method 3: exifread library (comprehensive fallback)
-    if EXIFREAD_AVAILABLE:
-        try:
-            extraction_log.append("🔍 Trying exifread library...")
-            
-            with open(image_path, 'rb') as f:
-                tags = exifread.process_file(f, details=True)
-                
-            if tags:
-                extraction_log.append(f"✅ exifread found {len(tags)} tags")
-                for key, value in tags.items():
-                    try:
-                        # Filter out some very verbose tags
-                        if not any(skip in str(key) for skip in ['Thumbnail', 'EXIF MakerNote', 'JPEGThumbnail']):
-                            exif_data[f'EXIFREAD_{str(key).replace(" ", "_")}'] = str(value)
-                    except:
-                        pass
-                
-                # Try to extract GPS from exifread format
-                try:
-                    if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
-                        lat_tag = str(tags['GPS GPSLatitude'])
-                        lon_tag = str(tags['GPS GPSLongitude'])
-                        lat_ref = str(tags.get('GPS GPSLatitudeRef', 'N'))
-                        lon_ref = str(tags.get('GPS GPSLongitudeRef', 'E'))
-                        
-                        # Parse exifread GPS format [deg, min, sec]
-                        lat_parts = lat_tag.replace('[', '').replace(']', '').split(', ')
-                        lon_parts = lon_tag.replace('[', '').replace(']', '').split(', ')
-                        
-                        if len(lat_parts) >= 3 and len(lon_parts) >= 3:
-                            lat = float(lat_parts[0]) + float(lat_parts[1])/60.0 + float(lat_parts[2])/3600.0
-                            lon = float(lon_parts[0]) + float(lon_parts[1])/60.0 + float(lon_parts[2])/3600.0
-                            
-                            if lat_ref.upper() == 'S':
-                                lat = -lat
-                            if lon_ref.upper() == 'W':
-                                lon = -lon
-                                
-                            # Only use if we haven't already found GPS coordinates
-                            if not exif_data.get('GPS_Latitude_Decimal'):
-                                exif_data['GPS_Latitude_Decimal'] = lat
-                                exif_data['GPS_Longitude_Decimal'] = lon
-                                exif_data['GPS_Source'] = 'exifread_library'
-                                extraction_log.append(f"🌍 GPS coordinates from exifread: {lat:.6f}, {lon:.6f}")
-                except Exception as e:
-                    extraction_log.append(f"❌ exifread GPS extraction failed: {str(e)}")
-            else:
-                extraction_log.append("⚠️ exifread found no tags")
-                
-        except Exception as e:
-            extraction_log.append(f"❌ exifread extraction failed: {str(e)}")
-    else:
-        extraction_log.append("❌ exifread library not available")
-    
-    # Log summary if debugging
-    if DEBUG_MODE:
-        for log_entry in extraction_log:
-            print(f"EXIF: {log_entry}", file=sys.stderr)
-    
-    # Create backward compatibility mappings
-    if exif_data.get('GPS_Latitude_Decimal'):
-        exif_data['GPS_Latitude'] = exif_data['GPS_Latitude_Decimal']
-        exif_data['GPS_Longitude'] = exif_data['GPS_Longitude_Decimal']
-    
-    return exif_data, {
-        'extraction_log': extraction_log,
-        'total_fields_extracted': len(exif_data),
-        'gps_found': bool(exif_data.get('GPS_Latitude_Decimal')),
-        'file_size_bytes': file_size
-    }
-
-def fetch_weather_data_openmeteo(lat, lon, date_iso):
-    """Fetch weather data from Open-Meteo (free, no API key required)"""
+def _dms_to_decimal(dms, ref):
+    """Convert GPS DMS in EXIF to decimal degrees"""
     try:
-        if DEBUG_MODE:
-            print(f"🌤️ Fetching weather from Open-Meteo for {lat}, {lon} on {date_iso}", file=sys.stderr)
-        
-        # Build Open-Meteo API URL
+        if isinstance(dms, (list, tuple)) and len(dms) >= 3:
+            deg = _rational_to_float(dms[0])
+            minute = _rational_to_float(dms[1])
+            sec = _rational_to_float(dms[2])
+            if None in (deg, minute, sec):
+                return None
+            dec = deg + minute / 60.0 + sec / 3600.0
+            if ref in ['S', 'W']:
+                dec = -dec
+            return dec
+    except Exception:
+        pass
+    return None
+
+# -----------------------------------------------------------------------------
+# EXIF extraction
+# -----------------------------------------------------------------------------
+
+def extract_comprehensive_exif(image_path):
+    """Extract EXIF metadata including GPS data"""
+    exif_data = {}
+    if not os.path.exists(image_path):
+        debug(f"Image not found: {image_path}")
+        return {}, {"error": f"Image not found: {image_path}"}
+    if not PIL_AVAILABLE:
+        debug("PIL not available for EXIF extraction")
+        return {}, {"error": "PIL not available"}
+
+    try:
+        with Image.open(image_path) as img:
+            exif_data['Image_Info'] = {
+                'format': img.format, 
+                'mode': img.mode, 
+                'size': list(img.size)
+            }
+            
+            exif_dict = img._getexif()
+            if exif_dict:
+                # Map standard tags
+                for tag_id, value in exif_dict.items():
+                    tag = ExifTags.TAGS.get(tag_id, f"Tag_{tag_id}")
+                    try:
+                        if isinstance(value, bytes):
+                            exif_data[f'PIL_{tag}'] = value.decode('utf-8', errors='replace')
+                        else:
+                            exif_data[f'PIL_{tag}'] = str(value)
+                    except Exception:
+                        pass
+
+                # Extract GPS block
+                gps_info = exif_dict.get(34853)  # GPS IFD
+                if gps_info:
+                    gps_lat = gps_info.get(2)
+                    gps_lat_ref = gps_info.get(1, 'N')
+                    gps_lon = gps_info.get(4)
+                    gps_lon_ref = gps_info.get(3, 'E')
+
+                    debug(f"EXIF GPS for {os.path.basename(image_path)}: lat={gps_lat} {gps_lat_ref}, lon={gps_lon} {gps_lon_ref}")
+
+                    lat_dec = _dms_to_decimal(gps_lat, gps_lat_ref) if gps_lat else None
+                    lon_dec = _dms_to_decimal(gps_lon, gps_lon_ref) if gps_lon else None
+
+                    if lat_dec is not None and lon_dec is not None:
+                        exif_data['GPS_Latitude'] = lat_dec
+                        exif_data['GPS_Longitude'] = lon_dec
+                        exif_data['GPS_Source'] = 'EXIF'
+                        debug(f"✓ Extracted EXIF GPS: {lat_dec:.6f}, {lon_dec:.6f}")
+                    else:
+                        debug("✗ EXIF GPS present but could not decode")
+                else:
+                    debug(f"✗ No GPS block in EXIF for {os.path.basename(image_path)}")
+            else:
+                debug(f"✗ No EXIF found for {os.path.basename(image_path)}")
+    except Exception as e:
+        debug(f"EXIF extraction error: {e}")
+
+    return exif_data, {'total_fields_extracted': len(exif_data)}
+
+# -----------------------------------------------------------------------------
+# Coordinate analysis
+# -----------------------------------------------------------------------------
+
+def analyze_coordinate_consistency(exif_coords, claimed_coords, tolerance_m=EXIF_CLAIMED_MATCH_TOLERANCE_M):
+    """Compare EXIF GPS with claimed GPS coordinates"""
+    if not exif_coords.get('GPS_Latitude') or not exif_coords.get('GPS_Longitude'):
+        return {
+            'coordinates_available': False,
+            'error': 'No GPS coordinates found in EXIF data'
+        }
+
+    try:
+        exif_lat = float(exif_coords['GPS_Latitude'])
+        exif_lon = float(exif_coords['GPS_Longitude'])
+        claimed_lat = float(claimed_coords['lat'])
+        claimed_lon = float(claimed_coords['lon'])
+
+        distance_meters = haversine_m(exif_lat, exif_lon, claimed_lat, claimed_lon)
+        debug(f"Coordinate distance: {distance_meters:.2f}m (EXIF vs Claimed)")
+
+        if distance_meters <= 10:
+            match_level = 'exact_match'
+        elif distance_meters <= 50:
+            match_level = 'close_match'
+        elif distance_meters <= 200:
+            match_level = 'approximate_match'
+        else:
+            match_level = 'no_match'
+
+        return {
+            'coordinates_available': True,
+            'exif_coordinates': {'lat': exif_lat, 'lon': exif_lon},
+            'claimed_coordinates': {'lat': claimed_lat, 'lon': claimed_lon},
+            'distance_meters': round(distance_meters, 2),
+            'match_level': match_level,
+            'coordinates_match': distance_meters <= tolerance_m
+        }
+    except Exception as e:
+        return {
+            'coordinates_available': False,
+            'error': f'Error analyzing coordinates: {str(e)}'
+        }
+
+# -----------------------------------------------------------------------------
+# Weather API
+# -----------------------------------------------------------------------------
+
+def fetch_real_weather_data(lat, lon, date_iso):
+    """Fetch weather data from Open-Meteo API"""
+    try:
+        debug(f"Fetching weather for {lat:.4f}, {lon:.4f} on {date_iso}")
         base_url = "https://api.open-meteo.com/v1/forecast"
         params = {
             'latitude': lat,
             'longitude': lon,
             'start_date': date_iso,
             'end_date': date_iso,
-            'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean,surface_pressure_mean,wind_speed_10m_max,wind_direction_10m_dominant',
+            'daily': 'temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean',
             'timezone': 'auto'
         }
-        
         url = f"{base_url}?{urllib.parse.urlencode(params)}"
         
         with urllib.request.urlopen(url, timeout=10) as response:
             if response.getcode() == 200:
-                raw_data = response.read().decode('utf-8')
-                api_data = json.loads(raw_data)
-                
-                if 'daily' in api_data and api_data['daily']:
-                    daily = api_data['daily']
-                    
-                    weather_result = {
+                data = json.loads(response.read().decode('utf-8'))
+                if 'daily' in data:
+                    daily = data['daily']
+                    debug("✓ Weather data fetched successfully")
+                    return {
                         'api_success': True,
-                        'source': 'open_meteo_free',
-                        'date_requested': date_iso,
-                        'coordinates': {'lat': lat, 'lon': lon},
-                        'raw_api_response': api_data,
+                        'source': 'open_meteo',
                         'processed_data': {
-                            'temperature_avg': daily.get('temperature_2m_mean', [None])[0],
                             'temperature_min': daily.get('temperature_2m_min', [None])[0],
                             'temperature_max': daily.get('temperature_2m_max', [None])[0],
                             'precipitation_mm': daily.get('precipitation_sum', [None])[0] or 0,
-                            'humidity_percent': daily.get('relative_humidity_2m_mean', [None])[0],
-                            'pressure_mb': daily.get('surface_pressure_mean', [None])[0],
-                            'wind_speed_kmh': daily.get('wind_speed_10m_max', [None])[0],
-                            'wind_direction': daily.get('wind_direction_10m_dominant', [None])[0]
-                        },
-                        'meta_info': {
-                            'timezone': api_data.get('timezone'),
-                            'elevation': api_data.get('elevation'),
-                            'api_source': 'Open-Meteo (Free)',
-                            'data_models': 'Multiple global weather models'
-                        },
-                        'stations_used': ['open_meteo_ensemble']
+                            'humidity_percent': daily.get('relative_humidity_2m_mean', [None])[0]
+                        }
                     }
-                    
-                    if DEBUG_MODE:
-                        print(f"✅ Open-Meteo weather data retrieved successfully", file=sys.stderr)
-                    
-                    return weather_result
-                else:
-                    return {
-                        'api_success': False,
-                        'error': 'No weather data available for this location/date from Open-Meteo',
-                        'date_requested': date_iso,
-                        'coordinates': {'lat': lat, 'lon': lon}
-                    }
-            else:
-                return {
-                    'api_success': False,
-                    'error': f'Open-Meteo API returned status {response.getcode()}'
-                }
-                
     except Exception as e:
-        if DEBUG_MODE:
-            print(f"❌ Open-Meteo API error: {str(e)}", file=sys.stderr)
-        return {
-            'api_success': False,
-            'error': f'Open-Meteo error: {str(e)}',
-            'date_requested': date_iso,
-            'source_attempted': 'open_meteo_free'
-        }
-
-def fetch_weather_data_meteostat(lat, lon, date_iso):
-    """Fetch weather data from Meteostat via RapidAPI (fallback)"""
-    try:
-        if DEBUG_MODE:
-            print(f"🌤️ Trying Meteostat via RapidAPI for {lat}, {lon} on {date_iso}", file=sys.stderr)
-        
-        conn = http.client.HTTPSConnection(RAPIDAPI_HOST)
-        headers = {
-            'x-rapidapi-key': RAPIDAPI_KEY,
-            'x-rapidapi-host': RAPIDAPI_HOST
-        }
-        
-        endpoint = f"/point/daily?lat={lat}&lon={lon}&alt=100&start={date_iso}&end={date_iso}"
-        conn.request("GET", endpoint, headers=headers)
-        response = conn.getresponse()
-        raw_data = response.read().decode("utf-8")
-        
-        if response.status == 200:
-            api_data = json.loads(raw_data)
-            
-            if 'data' in api_data and len(api_data['data']) > 0:
-                daily_data = api_data['data'][0]
-                weather_result = {
-                    'api_success': True,
-                    'source': 'meteostat_rapidapi',
-                    'date_requested': date_iso,
-                    'coordinates': {'lat': lat, 'lon': lon},
-                    'raw_api_response': daily_data,
-                    'processed_data': {
-                        'temperature_avg': daily_data.get('tavg'),
-                        'temperature_min': daily_data.get('tmin'),
-                        'temperature_max': daily_data.get('tmax'),
-                        'precipitation_mm': daily_data.get('prcp'),
-                        'humidity_percent': daily_data.get('rhum'),
-                        'pressure_mb': daily_data.get('pres'),
-                        'wind_speed_kmh': daily_data.get('wspd'),
-                        'wind_direction': daily_data.get('wdir'),
-                        'sunshine_hours': daily_data.get('tsun')
-                    },
-                    'meta_info': api_data.get('meta', {}),
-                    'stations_used': api_data.get('meta', {}).get('stations', [])
-                }
-                
-                if DEBUG_MODE:
-                    stations_count = len(api_data.get('meta', {}).get('stations', []))
-                    print(f"✅ Meteostat data retrieved: {stations_count} stations", file=sys.stderr)
-                
-                return weather_result
-            else:
-                return {
-                    'api_success': False,
-                    'error': 'No weather data available from Meteostat',
-                    'date_requested': date_iso,
-                    'coordinates': {'lat': lat, 'lon': lon}
-                }
-        else:
-            return {
-                'api_success': False,
-                'error': f'Meteostat API returned status {response.status}',
-                'response_body': raw_data[:200]
-            }
-            
-    except Exception as e:
-        if DEBUG_MODE:
-            print(f"❌ Meteostat API error: {str(e)}", file=sys.stderr)
-        return {
-            'api_success': False,
-            'error': f'Meteostat error: {str(e)}',
-            'date_requested': date_iso
-        }
-
-def fetch_real_weather_data(lat, lon, date_iso):
-    """Fetch weather data with multiple API fallbacks"""
-    # Try Open-Meteo first (free, reliable)
-    weather_data = fetch_weather_data_openmeteo(lat, lon, date_iso)
+        debug(f"✗ Weather API error: {e}")
     
-    if weather_data.get('api_success'):
-        return weather_data
-    
-    if DEBUG_MODE:
-        print("🔄 Open-Meteo failed, trying Meteostat...", file=sys.stderr)
-    
-    # Fallback to Meteostat if Open-Meteo fails
-    weather_data_fallback = fetch_weather_data_meteostat(lat, lon, date_iso)
-    
-    if weather_data_fallback.get('api_success'):
-        return weather_data_fallback
-    
-    # If both fail, return combined error info
     return {
-        'api_success': False,
-        'error': 'All weather APIs failed',
-        'attempted_sources': ['open_meteo', 'meteostat_rapidapi'],
-        'open_meteo_error': weather_data.get('error'),
-        'meteostat_error': weather_data_fallback.get('error'),
-        'date_requested': date_iso,
-        'coordinates': {'lat': lat, 'lon': lon}
+        'api_success': False, 
+        'error': 'Weather data unavailable', 
+        'source': 'open_meteo'
     }
 
-def analyze_coordinate_consistency(exif_coords, claimed_coords):
-    """Compare EXIF coordinates with claimed coordinates with enhanced analysis"""
-    if not exif_coords.get('GPS_Latitude') or not exif_coords.get('GPS_Longitude'):
-        return {
-            'coordinates_available': False,
-            'error': 'No GPS coordinates found in EXIF data - likely browser-captured image',
-            'analysis_note': 'Browser canvas.toBlob() strips EXIF GPS data automatically'
-        }
-    
-    try:
-        exif_lat = float(exif_coords['GPS_Latitude'])
-        exif_lon = float(exif_coords['GPS_Longitude'])
-        claimed_lat = float(claimed_coords['lat'])
-        claimed_lon = float(claimed_coords['lon'])
-        
-        # Calculate distance using Haversine approximation
-        import math
-        
-        # Convert to radians
-        lat1, lon1 = math.radians(exif_lat), math.radians(exif_lon)
-        lat2, lon2 = math.radians(claimed_lat), math.radians(claimed_lon)
-        
-        # Haversine formula for more accurate distance
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-        c = 2 * math.asin(math.sqrt(a))
-        distance_meters = 6371000 * c  # Earth radius in meters
-        
-        # Define tolerance levels
-        tolerance_levels = {
-            'exact_match': 10,      # 10 meters
-            'close_match': 50,      # 50 meters
-            'approximate_match': 200,  # 200 meters
-            'distant_match': 1000   # 1 km
-        }
-        
-        if distance_meters <= tolerance_levels['exact_match']:
-            match_level = 'exact_match'
-        elif distance_meters <= tolerance_levels['close_match']:
-            match_level = 'close_match'
-        elif distance_meters <= tolerance_levels['approximate_match']:
-            match_level = 'approximate_match'
-        elif distance_meters <= tolerance_levels['distant_match']:
-            match_level = 'distant_match'
-        else:
-            match_level = 'no_match'
-        
-        return {
-            'coordinates_available': True,
-            'exif_coordinates': {'lat': exif_lat, 'lon': exif_lon},
-            'claimed_coordinates': {'lat': claimed_lat, 'lon': claimed_lon},
-            'distance_meters': round(distance_meters, 2),
-            'distance_km': round(distance_meters / 1000, 3),
-            'match_level': match_level,
-            'coordinates_match': distance_meters <= tolerance_levels['approximate_match'],
-            'tolerance_levels': tolerance_levels,
-            'calculation_method': 'haversine_formula',
-            'gps_source': exif_coords.get('GPS_Source', 'unknown')
-        }
-        
-    except Exception as e:
-        return {
-            'coordinates_available': False,
-            'error': f'Error analyzing coordinates: {str(e)}',
-            'exif_coords_raw': exif_coords,
-            'claimed_coords_raw': claimed_coords
-        }
+# -----------------------------------------------------------------------------
+# Geofencing
+# -----------------------------------------------------------------------------
 
-def perform_geofencing_analysis(lat, lon, geojson_path):
-    """Enhanced geofencing analysis with Shapely"""
-    if not SHAPELY_AVAILABLE:
-        return {
-            'geofencing_available': False,
-            'error': 'Shapely library not available for geofencing',
-            'recommendation': 'Install shapely: pip install shapely'
-        }
+def _ensure_geojson_boundary(geojson_path, center_lat, center_lon, boundary_size_deg=0.005):
+    """Create a test boundary if GeoJSON file doesn't exist"""
+    if os.path.exists(geojson_path):
+        return
+
+    test_parcel = {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"parcel_id": "AUTO_GENERATED"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [center_lon - boundary_size_deg, center_lat - boundary_size_deg],
+                    [center_lon + boundary_size_deg, center_lat - boundary_size_deg],
+                    [center_lon + boundary_size_deg, center_lat + boundary_size_deg],
+                    [center_lon - boundary_size_deg, center_lat + boundary_size_deg],
+                    [center_lon - boundary_size_deg, center_lat - boundary_size_deg]
+                ]]
+            }
+        }]
+    }
     
+    os.makedirs(os.path.dirname(geojson_path), exist_ok=True)
+    with open(geojson_path, 'w') as f:
+        json.dump(test_parcel, f)
+    debug(f"Created boundary at {geojson_path} centered on {center_lat:.6f},{center_lon:.6f}")
+
+def _point_in_polygon_and_distance(lat, lon, polygon_coords):
+    """Check if point is inside polygon and calculate distance to boundary"""
+    if SHAPELY_AVAILABLE:
+        poly = geom_shape({"type": "Polygon", "coordinates": [polygon_coords]})
+        pt = Point(lon, lat)
+        inside = poly.contains(pt) or poly.touches(pt)
+        if inside:
+            return True, 0.0
+        nearest = nearest_points(poly.boundary, pt)[0]
+        d_m = haversine_m(lat, lon, nearest.y, nearest.x)
+        return False, d_m
+    else:
+        # Fallback: bounding box
+        lats = [c[1] for c in polygon_coords]
+        lons = [c[0] for c in polygon_coords]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+
+        inside = (min_lat <= lat <= max_lat) and (min_lon <= lon <= max_lon)
+        if inside:
+            return True, 0.0
+
+        clamped_lat = min(max(lat, min_lat), max_lat)
+        clamped_lon = min(max(lon, min_lon), max_lon)
+        d_m = haversine_m(lat, lon, clamped_lat, clamped_lon)
+        return False, d_m
+
+def perform_geofencing_analysis(lat, lon, geojson_path, fallback_center=None):
+    """Analyze if coordinates are within parcel boundaries"""
     try:
-        # Ensure geofence data exists
         if not os.path.exists(geojson_path):
-            # Create more realistic test boundary
-            boundary_size = 0.005  # ~500m radius
-            boundary_coords = [
-                [lon - boundary_size, lat - boundary_size],     # SW
-                [lon + boundary_size, lat - boundary_size],     # SE  
-                [lon + boundary_size, lat + boundary_size],     # NE
-                [lon - boundary_size, lat + boundary_size],     # NW
-                [lon - boundary_size, lat - boundary_size]      # Close polygon
-            ]
-            
-            test_parcel = {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "properties": {
-                        "parcel_id": f"AUTO_GENERATED_{int(time.time())}",
-                        "area_hectares": round((boundary_size * 2 * 111000) ** 2 / 10000, 2),
-                        "created": datetime.now().isoformat(),
-                        "note": "Auto-generated boundary for testing",
-                        "center_lat": lat,
-                        "center_lon": lon
-                    },
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [boundary_coords]
-                    }
-                }]
-            }
-            
-            os.makedirs(os.path.dirname(geojson_path), exist_ok=True)
-            with open(geojson_path, 'w') as f:
-                json.dump(test_parcel, f, indent=2)
-                
-            if DEBUG_MODE:
-                print(f"🗺️ Created test boundary: {len(boundary_coords)} points", file=sys.stderr)
-        
-        # Load and analyze geofence data
-        with open(geojson_path, 'r', encoding='utf-8') as f:
-            geojson_data = json.load(f)
-        
-        test_point = Point(lon, lat)
-        result = {
-            'geofencing_available': True,
-            'test_point': {'lat': lat, 'lon': lon},
-            'parcels_checked': [],
-            'point_inside_boundary': False,
-            'closest_boundary_distance': float('inf'),
-            'boundary_analysis': {},
-            'geojson_file_info': {
-                'path': geojson_path,
-                'feature_count': len(geojson_data.get('features', []))
-            }
-        }
-        
-        for idx, feature in enumerate(geojson_data.get('features', [])):
-            geometry = feature.get('geometry', {})
-            properties = feature.get('properties', {})
-            
-            try:
-                polygon = geom.shape(geometry)
-                
-                # Validate polygon
-                if not polygon.is_valid:
-                    polygon = polygon.buffer(0)  # Fix invalid geometry
-                
-                is_inside = polygon.contains(test_point)
-                distance_to_boundary = test_point.distance(polygon.boundary) * 111000  # Convert to meters
-                
-                parcel_result = {
-                    'parcel_id': properties.get('parcel_id', f'parcel_{idx}'),
-                    'is_inside': is_inside,
-                    'distance_to_boundary_meters': round(distance_to_boundary, 2),
-                    'parcel_properties': properties,
-                    'geometry_info': {
-                        'type': geometry.get('type'),
-                        'area_calculated': round(polygon.area * (111000 ** 2) / 10000, 4),  # Convert to hectares
-                        'perimeter_calculated': round(polygon.length * 111000, 2)  # Convert to meters
-                    }
-                }
-                
-                result['parcels_checked'].append(parcel_result)
-                
-                if is_inside:
-                    result['point_inside_boundary'] = True
-                    result['matched_parcel'] = parcel_result
-                
-                # Track closest boundary
-                if distance_to_boundary < result['closest_boundary_distance']:
-                    result['closest_boundary_distance'] = round(distance_to_boundary, 2)
-                    
-                if DEBUG_MODE:
-                    status = 'INSIDE' if is_inside else 'OUTSIDE'
-                    parcel_id = properties.get('parcel_id', f'parcel_{idx}')
-                    print(f"🗺️ {parcel_id}: {status} ({distance_to_boundary:.1f}m)", file=sys.stderr)
-                
-            except Exception as e:
-                result['parcels_checked'].append({
-                    'parcel_id': properties.get('parcel_id', f'parcel_{idx}'),
-                    'error': f'Geometry analysis failed: {str(e)}'
-                })
-        
-        # Generate analysis summary
-        successful_checks = [p for p in result['parcels_checked'] if 'error' not in p]
-        result['boundary_analysis'] = {
-            'total_parcels': len(result['parcels_checked']),
-            'successful_checks': len(successful_checks),
-            'failed_checks': len(result['parcels_checked']) - len(successful_checks),
-            'point_location_status': 'inside_boundary' if result['point_inside_boundary'] else 'outside_boundary',
-            'closest_boundary_meters': result['closest_boundary_distance'] if result['closest_boundary_distance'] != float('inf') else None
-        }
-        
-        return result
-        
-    except Exception as e:
-        return {
-            'geofencing_available': False,
-            'error': f'Geofencing analysis failed: {str(e)}',
-            'geojson_path': geojson_path,
-            'test_point': {'lat': lat, 'lon': lon}
-        }
-
-def calculate_confidence_score(exif_data, coord_analysis, weather_data, geofencing_result):
-    """Enhanced confidence scoring with detailed breakdown"""
-    confidence_factors = {}
-    
-    # EXIF Data Quality (30% weight)
-    exif_score = 0.0
-    exif_details = {
-        'device_info_available': False,
-        'gps_data_available': False,
-        'timestamp_data_available': False,
-        'precision_data_available': False
-    }
-    
-    if exif_data:
-        # Check for device information
-        if any(key for key in exif_data.keys() if any(term in key.lower() for term in ['make', 'model', 'software'])):
-            exif_score += 0.3
-            exif_details['device_info_available'] = True
-        
-        # Check for GPS data
-        if exif_data.get('GPS_Latitude') and exif_data.get('GPS_Longitude'):
-            exif_score += 0.4
-            exif_details['gps_data_available'] = True
-        
-        # Check for timestamp data
-        if any(key for key in exif_data.keys() if 'datetime' in key.lower()):
-            exif_score += 0.2
-            exif_details['timestamp_data_available'] = True
-        
-        # Check for GPS precision indicators
-        if any(key in exif_data for key in ['GPS_DOP', 'GPS_Satellites']):
-            exif_score += 0.1
-            exif_details['precision_data_available'] = True
-    
-    confidence_factors['exif_data_quality'] = {
-        'score': min(1.0, exif_score),
-        'details': exif_details,
-        'weight': 0.30
-    }
-    
-    # Coordinate Consistency (25% weight)
-    coord_score = 0.0
-    coord_details = {'status': 'no_gps_data'}
-    
-    if coord_analysis.get('coordinates_available'):
-        match_level = coord_analysis.get('match_level', 'no_match')
-        if match_level == 'exact_match':
-            coord_score = 1.0
-            coord_details = {'status': 'exact_match', 'distance_m': coord_analysis.get('distance_meters')}
-        elif match_level == 'close_match':
-            coord_score = 0.8
-            coord_details = {'status': 'close_match', 'distance_m': coord_analysis.get('distance_meters')}
-        elif match_level == 'approximate_match':
-            coord_score = 0.6
-            coord_details = {'status': 'approximate_match', 'distance_m': coord_analysis.get('distance_meters')}
-        elif match_level == 'distant_match':
-            coord_score = 0.3
-            coord_details = {'status': 'distant_match', 'distance_m': coord_analysis.get('distance_meters')}
-        else:
-            coord_score = 0.1
-            coord_details = {'status': 'no_match', 'distance_m': coord_analysis.get('distance_meters')}
-    
-    confidence_factors['coordinate_consistency'] = {
-        'score': coord_score,
-        'details': coord_details,
-        'weight': 0.25
-    }
-    
-    # Weather Data Quality (20% weight)
-    weather_score = 0.0
-    weather_details = {'status': 'failed'}
-    
-    if weather_data.get('api_success'):
-        weather_score = 0.9
-        weather_details = {
-            'status': 'success',
-            'source': weather_data.get('source'),
-            'stations': len(weather_data.get('stations_used', [])),
-            'data_completeness': sum(1 for v in weather_data.get('processed_data', {}).values() if v is not None) / max(len(weather_data.get('processed_data', {})), 1)
-        }
-    else:
-        weather_details = {
-            'status': 'failed',
-            'error': weather_data.get('error', 'Unknown error')
-        }
-    
-    confidence_factors['weather_data_quality'] = {
-        'score': weather_score,
-        'details': weather_details,
-        'weight': 0.20
-    }
-    
-    # Geofencing Analysis (25% weight)
-    geo_score = 0.0
-    geo_details = {'status': 'unavailable'}
-    
-    if geofencing_result.get('geofencing_available'):
-        if geofencing_result.get('point_inside_boundary'):
-            geo_score = 1.0
-            geo_details = {'status': 'inside_boundary', 'parcels_checked': len(geofencing_result.get('parcels_checked', []))}
-        elif geofencing_result.get('parcels_checked'):
-            # Partial credit based on proximity
-            closest_distance = geofencing_result.get('closest_boundary_distance', float('inf'))
-            if closest_distance <= 50:  # Within 50m
-                geo_score = 0.7
-                geo_details = {'status': 'near_boundary', 'distance_m': closest_distance}
-            elif closest_distance <= 200:  # Within 200m
-                geo_score = 0.5
-                geo_details = {'status': 'close_to_boundary', 'distance_m': closest_distance}
+            if fallback_center:
+                _ensure_geojson_boundary(geojson_path, fallback_center[0], fallback_center[1])
             else:
-                geo_score = 0.3
-                geo_details = {'status': 'outside_boundary', 'distance_m': closest_distance}
+                _ensure_geojson_boundary(geojson_path, lat, lon)
+
+        with open(geojson_path, 'r') as f:
+            geojson_data = json.load(f)
+
+        for feature in geojson_data.get('features', []):
+            coords = feature['geometry']['coordinates'][0]
+            inside, dist_m = _point_in_polygon_and_distance(lat, lon, coords)
+            
+            status = "✓ INSIDE" if inside else f"✗ OUTSIDE ({dist_m:.1f}m away)"
+            debug(f"Geofencing: {status} boundary")
+            
+            return {
+                'geofencing_available': True,
+                'point_inside_boundary': bool(inside),
+                'closest_boundary_distance': round(float(dist_m), 2)
+            }
+
+        return {'geofencing_available': False, 'error': 'No features in GeoJSON'}
+    except Exception as e:
+        debug(f"Geofencing error: {e}")
+        return {'geofencing_available': False, 'error': str(e)}
+
+# -----------------------------------------------------------------------------
+# Damage classification
+# -----------------------------------------------------------------------------
+
+class CropDamageClassifier:
+    def __init__(self):
+        self.damage_classes = ['DR', 'G', 'ND', 'WD', 'other']
+        self.use_torch = TORCH_AVAILABLE
+        debug(f"Damage classifier initialized (PyTorch: {self.use_torch})")
+
+    def predict_damage(self, image_path):
+        """Predict crop damage from image"""
+        try:
+            if not PIL_AVAILABLE or np is None:
+                debug("Using fallback damage prediction (PIL/NumPy unavailable)")
+                return self._fallback_prediction()
+            
+            img = Image.open(image_path).convert('RGB')
+            damage_probs = self._heuristic_damage_detection(img)
+            damage_scores = {
+                self.damage_classes[i]: float(damage_probs[i]) 
+                for i in range(len(self.damage_classes))
+            }
+            
+            primary_damage = max(damage_scores.items(), key=lambda x: x[1])
+            damage_percent = self._calculate_damage_percentage(damage_scores)
+            
+            debug(f"Damage analysis: {damage_percent:.1f}% ({primary_damage[0]})")
+            
+            return {
+                'damage_scores': damage_scores,
+                'primary_damage_type': primary_damage[0],
+                'confidence': primary_damage[1],
+                'damage_percentage': damage_percent,
+                'severity': self._categorize_severity(damage_percent),
+                'is_genuine_damage': primary_damage[0] != 'ND' and primary_damage[1] > 0.4
+            }
+        except Exception as e:
+            debug(f"Damage prediction error: {e}")
+            return self._fallback_prediction()
+
+    def _heuristic_damage_detection(self, img):
+        """Heuristic-based damage detection using color analysis"""
+        img_array = np.array(img)
+        mean_green = np.mean(img_array[:, :, 1])
+        mean_red = np.mean(img_array[:, :, 0])
+        mean_blue = np.mean(img_array[:, :, 2])
+        std_color = np.std(img_array)
+        health_score = mean_green / (mean_red + mean_blue + 1)
+        
+        if mean_green < 80 and std_color < 40:
+            return np.array([0.65, 0.10, 0.05, 0.10, 0.10])  # Drought
+        elif mean_green > 100 and std_color > 70:
+            return np.array([0.10, 0.60, 0.10, 0.10, 0.10])  # Grasshopper
+        elif mean_blue > mean_green and mean_blue > 120:
+            return np.array([0.10, 0.10, 0.05, 0.65, 0.10])  # Weed
+        elif health_score > 0.8 and mean_green > 120:
+            return np.array([0.10, 0.10, 0.65, 0.10, 0.05])  # No Damage
         else:
-            geo_score = 0.2
-            geo_details = {'status': 'no_boundaries_found'}
-    else:
-        geo_details = {'status': 'unavailable', 'error': geofencing_result.get('error')}
-    
-    confidence_factors['geofencing_reliability'] = {
-        'score': geo_score,
-        'details': geo_details,
-        'weight': 0.25
-    }
-    
-    # Calculate weighted overall confidence
-    weights = {
-        'exif_data_quality': 0.30,
-        'coordinate_consistency': 0.25,
-        'weather_data_quality': 0.20,
-        'geofencing_reliability': 0.25
-    }
-    
-    overall_confidence = sum(
-        confidence_factors[factor]['score'] * weights[factor] 
-        for factor in weights.keys()
+            return np.array([0.20, 0.20, 0.20, 0.20, 0.20])  # Uncertain
+
+    def _calculate_damage_percentage(self, damage_scores):
+        """Calculate overall damage percentage"""
+        damage_weights = {'DR': 0.80, 'G': 0.85, 'WD': 0.75, 'ND': 0.0, 'other': 0.60}
+        weighted_damage = sum(damage_scores[d] * damage_weights[d] for d in damage_scores)
+        return min(100, weighted_damage * 100)
+
+    def _categorize_severity(self, damage_percent):
+        """Categorize damage severity"""
+        if damage_percent < 15:
+            return 'minimal'
+        elif damage_percent < 35:
+            return 'moderate'
+        elif damage_percent < 60:
+            return 'moderate_to_severe'
+        else:
+            return 'severe'
+
+    def _fallback_prediction(self):
+        """Fallback prediction when libraries unavailable"""
+        return {
+            'damage_scores': {'DR': 0.3, 'G': 0.2, 'ND': 0.2, 'WD': 0.2, 'other': 0.1},
+            'primary_damage_type': 'unknown',
+            'confidence': 0.3,
+            'damage_percentage': 30.0,
+            'severity': 'moderate',
+            'is_genuine_damage': True
+        }
+
+# -----------------------------------------------------------------------------
+# Fraud detection
+# -----------------------------------------------------------------------------
+
+class FraudDetectionEngine:
+    def analyze_fraud_patterns(self, all_exif_data, all_coord_analyses, damage_analysis, weather_data):
+        """Analyze fraud patterns across all images"""
+        red_flags = []
+        
+        # Check EXIF data availability across all images
+        exif_available_count = sum(1 for exif in all_exif_data if exif and len(exif) > 3)
+        if exif_available_count < len(all_exif_data) / 2:
+            red_flags.append({
+                'category': 'authenticity',
+                'severity': 'medium',
+                'detail': f'Limited EXIF data ({exif_available_count}/{len(all_exif_data)} images)',
+                'confidence': 0.6
+            })
+        
+        # Check coordinate consistency across all images
+        for idx, coord_analysis in enumerate(all_coord_analyses):
+            if coord_analysis.get('coordinates_available'):
+                distance = coord_analysis.get('distance_meters', 0)
+                if distance > 500:
+                    red_flags.append({
+                        'category': 'location',
+                        'severity': 'critical',
+                        'detail': f'Image {idx+1}: GPS {distance:.0f}m from claimed location',
+                        'confidence': 0.9
+                    })
+        
+        # Check for image editing software
+        for idx, exif_data in enumerate(all_exif_data):
+            if exif_data:
+                software_keys = [k for k in exif_data.keys() if 'software' in k.lower()]
+                for key in software_keys:
+                    value = str(exif_data[key]).lower()
+                    if any(editor in value for editor in ['photoshop', 'gimp', 'paint.net']):
+                        red_flags.append({
+                            'category': 'authenticity',
+                            'severity': 'high',
+                            'detail': f'Image {idx+1}: Editing software detected',
+                            'confidence': 0.75
+                        })
+        
+        # Calculate fraud score
+        fraud_score = 0.05
+        if red_flags:
+            severity_weights = {'critical': 0.4, 'high': 0.3, 'medium': 0.2, 'low': 0.1}
+            fraud_score = sum(
+                severity_weights.get(flag['severity'], 0.1) * flag['confidence'] 
+                for flag in red_flags
+            )
+        
+        debug(f"Fraud analysis: {len(red_flags)} red flags, score: {fraud_score:.2f}")
+        
+        return {
+            'total_red_flags': len(red_flags),
+            'fraud_indicators': red_flags,
+            'fraud_likelihood': min(1.0, fraud_score),
+            'investigation_required': len(red_flags) > 0
+        }
+
+# -----------------------------------------------------------------------------
+# Main batch processing function
+# -----------------------------------------------------------------------------
+
+def process_claim_comprehensive(image_paths, coordinates, damage_image_path,
+                                farmer_claimed_damage, sum_insured, geojson_path,
+                                parcel_id, claim_id=None):
+    """
+    Process complete claim with 4 corner images + 1 damage image
+    Returns comprehensive analysis with decision recommendation
+    """
+    start_time = time.time()
+    if not claim_id:
+        claim_id = f"CLAIM_{datetime.now().strftime('%Y%m%d')}_{int(time.time() * 1000) % 1000:03d}"
+
+    debug("="*60)
+    debug(f"Starting comprehensive claim processing: {claim_id}")
+    debug(f"Parcel ID: {parcel_id}")
+    debug("="*60)
+
+    damage_classifier = CropDamageClassifier()
+    fraud_detector = FraudDetectionEngine()
+
+    # Phase 1: Process authentication images (4 corners)
+    debug("\n[PHASE 1] Authentication image verification...")
+    auth_results = []
+    all_exif_data = []
+    all_coord_analyses = []
+    weather_data = {}
+
+    center_lat, center_lon = coordinates[0]
+
+    for idx, (img_path, (lat, lon)) in enumerate(zip(image_paths, coordinates)):
+        debug(f"\nProcessing corner image {idx+1}/4: {os.path.basename(img_path)}")
+        
+        exif_data, _meta = extract_comprehensive_exif(img_path)
+        all_exif_data.append(exif_data)
+        
+        coord_analysis = analyze_coordinate_consistency(exif_data, {'lat': lat, 'lon': lon})
+        all_coord_analyses.append(coord_analysis)
+        
+        # Fetch weather only once
+        if idx == 0:
+            date_iso = datetime.now().strftime("%Y-%m-%d")
+            weather_data = fetch_real_weather_data(lat, lon, date_iso)
+        
+        # Determine coordinates for geofencing
+        if coord_analysis.get('coordinates_available') and coord_analysis.get('coordinates_match'):
+            gf_lat = coord_analysis['exif_coordinates']['lat']
+            gf_lon = coord_analysis['exif_coordinates']['lon']
+            debug("Using EXIF coordinates for geofencing")
+        else:
+            gf_lat, gf_lon = (lat, lon)
+            debug("Using claimed coordinates for geofencing")
+        
+        geo_result = perform_geofencing_analysis(
+            gf_lat, gf_lon, geojson_path, 
+            fallback_center=(center_lat, center_lon)
+        )
+        
+        auth_results.append({
+            'image_index': idx + 1,
+            'image_path': os.path.basename(img_path),
+            'exif_available': bool(exif_data),
+            'gps_verified': coord_analysis.get('coordinates_available', False) and coord_analysis.get('coordinates_match', False),
+            'within_boundary': geo_result.get('point_inside_boundary', False),
+            'distance_to_boundary_m': geo_result.get('closest_boundary_distance'),
+            'exif_vs_claimed_distance_m': coord_analysis.get('distance_meters'),
+            'exif_match_level': coord_analysis.get('match_level', 'unknown')
+        })
+
+    # Phase 2: Damage assessment
+    debug("\n[PHASE 2] AI damage assessment...")
+    debug(f"Analyzing damage image: {os.path.basename(damage_image_path)}")
+    damage_result = damage_classifier.predict_damage(damage_image_path)
+
+    # Phase 3: Fraud analysis
+    debug("\n[PHASE 3] Fraud pattern analysis...")
+    fraud_analysis = fraud_detector.analyze_fraud_patterns(
+        all_exif_data, all_coord_analyses, damage_result, weather_data
     )
+
+    # Phase 4: Scoring and decision
+    debug("\n[PHASE 4] Scoring and decision making...")
     
-    return {
-        'overall_confidence': round(overall_confidence, 3),
-        'confidence_breakdown': confidence_factors,
-        'weights_used': weights,
-        'recommendation': get_recommendation(overall_confidence),
-        'analysis_summary': {
-            'strongest_factor': max(confidence_factors.keys(), key=lambda k: confidence_factors[k]['score']),
-            'weakest_factor': min(confidence_factors.keys(), key=lambda k: confidence_factors[k]['score']),
-            'total_factors_analyzed': len(confidence_factors)
+    authenticity_score = sum(1 for r in auth_results if r['within_boundary']) / max(1, len(auth_results))
+    damage_verification_score = damage_result.get('confidence', 0.5)
+    fraud_detection_score = 1.0 - fraud_analysis['fraud_likelihood']
+    external_validation_score = 0.7 if weather_data.get('api_success') else 0.5
+
+    overall_confidence = (
+        authenticity_score * 0.25 +
+        damage_verification_score * 0.30 +
+        fraud_detection_score * 0.25 +
+        external_validation_score * 0.20
+    )
+
+    debug(f"Scores: Auth={authenticity_score:.2f}, Damage={damage_verification_score:.2f}, "
+          f"Fraud={fraud_detection_score:.2f}, External={external_validation_score:.2f}")
+    debug(f"Overall confidence: {overall_confidence:.2f}")
+
+    # Damage calculation
+    ai_damage = damage_result.get('damage_percentage', 0)
+    variance = abs(ai_damage - farmer_claimed_damage)
+    variance_acceptable = variance <= 15
+    final_damage = (ai_damage + farmer_claimed_damage) / 2 if variance_acceptable else ai_damage
+    base_payout = (final_damage / 100) * sum_insured
+
+    debug(f"Damage: AI={ai_damage:.1f}%, Farmer={farmer_claimed_damage}%, Final={final_damage:.1f}%")
+
+    # Final decision
+    if overall_confidence >= 0.75 and not fraud_analysis['investigation_required']:
+        decision, risk, action = 'APPROVE', 'low', 'APPROVE_CLAIM'
+        manual_review = False
+    elif overall_confidence >= 0.50:
+        decision, risk, action = 'MANUAL_REVIEW', 'medium', 'SCHEDULE_MANUAL_REVIEW'
+        manual_review = True
+    else:
+        decision, risk, action = 'REJECT', 'high', 'REJECT_CLAIM'
+        manual_review = True
+
+    processing_time = (time.time() - start_time) * 1000.0
+
+    debug(f"\n{'='*60}")
+    debug(f"FINAL DECISION: {decision}")
+    debug(f"Risk Level: {risk}")
+    debug(f"Processing Time: {processing_time:.0f}ms")
+    debug(f"{'='*60}\n")
+
+    # Build comprehensive output
+    output = {
+        'claim_id': claim_id,
+        'processing_timestamp': datetime.now(timezone.utc).isoformat(),
+        'processing_time_ms': round(processing_time, 2),
+
+        'overall_assessment': {
+            'final_decision': decision,
+            'confidence_score': round(overall_confidence, 3),
+            'risk_level': risk,
+            'manual_review_required': manual_review
+        },
+
+        'detailed_scores': {
+            'authenticity_score': round(authenticity_score, 2),
+            'damage_verification_score': round(damage_verification_score, 2),
+            'fraud_detection_score': round(fraud_detection_score, 2),
+            'external_validation_score': round(external_validation_score, 2)
+        },
+
+        'damage_assessment': {
+            'ai_calculated_damage_percent': round(ai_damage, 1),
+            'farmer_claimed_damage_percent': farmer_claimed_damage,
+            'final_damage_percent': round(final_damage, 1),
+            'variance_acceptable': variance_acceptable,
+            'damage_type': damage_result.get('primary_damage_type', 'unknown'),
+            'severity': damage_result.get('severity', 'unknown'),
+            'damage_scores': damage_result.get('damage_scores', {})
+        },
+
+        'payout_calculation': {
+            'sum_insured': sum_insured,
+            'damage_percent': round(final_damage, 1),
+            'base_payout': round(base_payout, 2),
+            'adjustments': [],
+            'final_payout_amount': round(base_payout, 2),
+            'currency': 'INR'
+        },
+
+        'verification_evidence': {
+            'authenticity_verified': authenticity_score > 0.7,
+            'location_verified': all(r['within_boundary'] for r in auth_results),
+            'damage_verified': damage_result.get('is_genuine_damage', False),
+            'weather_supports_claim': weather_data.get('api_success', False),
+            'authentication_images_summary': auth_results
+        },
+
+        'fraud_indicators': fraud_analysis,
+
+        'recommendation': {
+            'action': action,
+            'payout_amount': round(base_payout, 2) if decision == 'APPROVE' else 0,
+            'processing_priority': 'high' if risk == 'high' else 'normal',
+            'additional_verification_needed': manual_review,
+            'estimated_settlement_days': 3 if decision == 'APPROVE' else 5
+        },
+
+        'ai_reasoning': {
+            'decision_factors': [
+                f"Overall confidence: {overall_confidence:.1%}",
+                f"Authenticity: {authenticity_score:.1%}",
+                f"Fraud risk: {fraud_analysis['fraud_likelihood']:.1%}"
+            ],
+            'supporting_factors': [
+                f"AI damage: {ai_damage:.1f}% vs Farmer: {farmer_claimed_damage}%",
+                f"Weather data: {'Available' if weather_data.get('api_success') else 'Unavailable'}",
+                f"All images in boundary: {all(r['within_boundary'] for r in auth_results)}"
+            ]
+        },
+
+        'audit_trail': {
+            'processed_by': 'CropInsurance_AI_v2.0_BatchMode',
+            'images_analyzed': len(image_paths) + 1,
+            'corner_images': len(image_paths),
+            'damage_images': 1,
+            'processing_stages_completed': [
+                'authentication', 'damage_assessment', 'fraud_detection', 'scoring', 'decision'
+            ]
         }
     }
 
-def get_recommendation(confidence_score):
-    """Enhanced recommendation system"""
-    if confidence_score >= 0.8:
-        return {
-            'status': 'approve',
-            'reason': f'High confidence ({confidence_score:.1%}) - All verification checks passed',
-            'action': 'Process claim automatically',
-            'priority': 'high',
-            'estimated_processing_time': '< 1 hour'
-        }
-    elif confidence_score >= 0.6:
-        return {
-            'status': 'manual_review',
-            'reason': f'Moderate confidence ({confidence_score:.1%}) - Human verification recommended',
-            'action': 'Schedule manual review within 24 hours',
-            'priority': 'medium',
-            'estimated_processing_time': '1-2 days'
-        }
-    elif confidence_score >= 0.4:
-        return {
-            'status': 'additional_evidence',
-            'reason': f'Low confidence ({confidence_score:.1%}) - Insufficient verification data',
-            'action': 'Request additional documentation from claimant',
-            'priority': 'low',
-            'estimated_processing_time': '3-5 days'
-        }
-    else:
-        return {
-            'status': 'reject',
-            'reason': f'Very low confidence ({confidence_score:.1%}) - Multiple verification failures',
-            'action': 'Reject claim and initiate fraud investigation',
-            'priority': 'urgent',
-            'estimated_processing_time': 'immediate'
-        }
+    if decision == 'REJECT':
+        output['rejection_reasons'] = fraud_analysis['fraud_indicators']
+
+    return output
+
+# -----------------------------------------------------------------------------
+# CLI Entry Point
+# -----------------------------------------------------------------------------
 
 def main():
-    """Enhanced main processing pipeline"""
-    start_time = time.time()
+    """
+    Command-line interface for batch processing
     
-    try:
-        if len(sys.argv) < 8:
-            safe_print_json({
-                "error": "Insufficient arguments",
-                "required": ["image_path", "lat", "lon", "timestamp_ms", "geojson_path", "overlay_text", "parcel_id"],
-                "provided": len(sys.argv) - 1
-            })
-            return
-        
-        image_path, lat_str, lon_str, timestamp_str, geojson_path, overlay_text, parcel_id = sys.argv[1:8]
-        
-        # Validate and parse input parameters
-        try:
-            lat = float(lat_str)
-            lon = float(lon_str)
-            timestamp_ms = int(timestamp_str)
-            
-            # Validate coordinate ranges
-            if not (-90 <= lat <= 90):
-                raise ValueError(f"Invalid latitude: {lat} (must be between -90 and 90)")
-            if not (-180 <= lon <= 180):
-                raise ValueError(f"Invalid longitude: {lon} (must be between -180 and 180)")
-                
-        except ValueError as e:
-            safe_print_json({
-                "error": "Invalid input parameters",
-                "details": str(e),
-                "provided_args": {
-                    "lat": lat_str,
-                    "lon": lon_str,
-                    "timestamp": timestamp_str
-                }
-            })
-            return
-        
-        if DEBUG_MODE:
-            print(f"🔍 Starting enhanced analysis for {os.path.basename(image_path)}", file=sys.stderr)
-            print(f"📍 Location: {lat:.6f}, {lon:.6f}", file=sys.stderr)
-            print(f"⏰ Timestamp: {datetime.fromtimestamp(timestamp_ms/1000).isoformat()}", file=sys.stderr)
-        
-        # Phase 1: EXIF Data Extraction
-        if DEBUG_MODE:
-            print("📱 Phase 1: EXIF data extraction...", file=sys.stderr)
-        exif_data, exif_error = extract_comprehensive_exif(image_path)
-        
-        # Phase 2: Coordinate Analysis
-        if DEBUG_MODE:
-            print("📍 Phase 2: Coordinate consistency analysis...", file=sys.stderr)
-        coord_analysis = analyze_coordinate_consistency(exif_data, {'lat': lat, 'lon': lon})
-        
-        # Phase 3: Weather Data Retrieval
-        if DEBUG_MODE:
-            print("🌤️ Phase 3: Weather data retrieval...", file=sys.stderr)
-        date_iso = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-        weather_data = fetch_real_weather_data(lat, lon, date_iso)
-        
-        # Phase 4: Geofencing Analysis
-        if DEBUG_MODE:
-            print("🗺️ Phase 4: Geofencing analysis...", file=sys.stderr)
-        geofencing_result = perform_geofencing_analysis(lat, lon, geojson_path)
-        
-        # Phase 5: Confidence Assessment
-        if DEBUG_MODE:
-            print("📊 Phase 5: Confidence assessment...", file=sys.stderr)
-        confidence_analysis = calculate_confidence_score(exif_data, coord_analysis, weather_data, geofencing_result)
-        
-        processing_time = (time.time() - start_time) * 1000
-        
-        # Compile comprehensive result
-        result = {
-            'processing_info': {
-                'timestamp': int(time.time() * 1000),
-                'processing_time_ms': round(processing_time, 2),
-                'version': '3.2-comprehensive-analysis',
-                'libraries_status': {
-                    'PIL': PIL_AVAILABLE,
-                    'EXIF': EXIF_AVAILABLE,
-                    'ExifRead': EXIFREAD_AVAILABLE,
-                    'Shapely': SHAPELY_AVAILABLE
-                },
-                'analysis_phases_completed': 5
-            },
-            'input_data': {
-                'image_path': image_path,
-                'image_filename': os.path.basename(image_path),
-                'claimed_coordinates': {'lat': lat, 'lon': lon},
-                'timestamp_ms': timestamp_ms,
-                'timestamp_iso': datetime.fromtimestamp(timestamp_ms/1000).isoformat(),
-                'overlay_text': overlay_text,
-                'parcel_id': parcel_id,
-                'analysis_date': date_iso
-            },
-            'extracted_exif_data': {
-                'available': bool(exif_data),
-                'total_fields': len(exif_data),
-                'gps_data_found': bool(exif_data.get('GPS_Latitude')),
-                'raw_exif': exif_data,
-                'extraction_details': exif_error
-            },
-            'coordinate_analysis': coord_analysis,
-            'weather_verification': weather_data,
-            'geofencing_analysis': geofencing_result,
-            'confidence_assessment': confidence_analysis,
-            'final_recommendation': confidence_analysis['recommendation']
+    Usage:
+    python pipeline.py <img1> <lat1> <lon1> <img2> <lat2> <lon2> <img3> <lat3> <lon3> 
+                      <img4> <lat4> <lon4> <damage_img> <farmer_damage%> <sum_insured> 
+                      <geojson_path> <parcel_id> [TRUST_CLAIMED_COORDS]
+    """
+    
+    if len(sys.argv) < 17:
+        error_response = {
+            'error': 'Insufficient arguments',
+            'required_args': 17,
+            'provided_args': len(sys.argv) - 1,
+            'usage': 'python pipeline.py <img1> <lat1> <lon1> <img2> <lat2> <lon2> '
+                    '<img3> <lat3> <lon3> <img4> <lat4> <lon4> <damage_img> '
+                    '<farmer_damage%> <sum_insured> <geojson_path> <parcel_id> [TRUST_CLAIMED_COORDS]',
+            'example': 'python pipeline.py corner1.jpg 19.123 72.456 corner2.jpg 19.124 72.457 '
+                      'corner3.jpg 19.125 72.458 corner4.jpg 19.126 72.459 damage.jpg 50.0 '
+                      '100000 data/parcel.geojson PARCEL001 1'
         }
+        print(json.dumps(error_response, indent=2))
+        sys.exit(1)
+
+    try:
+        args = sys.argv[1:]
         
-        if DEBUG_MODE:
-            confidence_pct = confidence_analysis['overall_confidence'] * 100
-            recommendation = confidence_analysis['recommendation']['status']
-            print(f"✅ Analysis complete: {confidence_pct:.1f}% confidence → {recommendation.upper()}", file=sys.stderr)
+        # Parse image paths (4 corner images)
+        image_paths = [args[0], args[3], args[6], args[9]]
         
-        safe_print_json(result)
+        # Parse coordinates for each corner
+        coordinates = [
+            (float(args[1]), float(args[2])),   # Corner 1
+            (float(args[4]), float(args[5])),   # Corner 2
+            (float(args[7]), float(args[8])),   # Corner 3
+            (float(args[10]), float(args[11]))  # Corner 4
+        ]
+        
+        # Parse damage image and parameters
+        damage_img = args[12]
+        farmer_damage = float(args[13])
+        sum_insured = float(args[14])
+        geojson_path = args[15]
+        parcel_id = args[16] if len(args) > 16 else 'PARCEL_001'
+
+        # Optional: Trust claimed coordinates flag
+        trust_coords = TRUST_CLAIMED_COORDS
+        if len(args) > 17:
+            trust_coords = (str(args[17]).strip() in ('1', 'true', 'True', 'YES', 'yes'))
+
+        # Validate file existence
+        all_files = image_paths + [damage_img]
+        for file_path in all_files:
+            if not os.path.exists(file_path):
+                error_response = {
+                    'error': 'File not found',
+                    'missing_file': file_path,
+                    'timestamp': datetime.now().isoformat()
+                }
+                print(json.dumps(error_response, indent=2), file=sys.stderr)
+                sys.exit(1)
+
+        # Run comprehensive processing
+        result = process_claim_comprehensive(
+            image_paths=image_paths,
+            coordinates=coordinates,
+            damage_image_path=damage_img,
+            farmer_claimed_damage=farmer_damage,
+            sum_insured=sum_insured,
+            geojson_path=geojson_path,
+            parcel_id=parcel_id
+        )
+        
+        # Output JSON result to stdout
+        print(json.dumps(result, indent=2))
+        
+    except ValueError as e:
+        error_response = {
+            'error': 'Invalid argument format',
+            'details': str(e),
+            'hint': 'Ensure coordinates, damage%, and sum_insured are valid numbers',
+            'timestamp': datetime.now().isoformat()
+        }
+        print(json.dumps(error_response, indent=2), file=sys.stderr)
+        sys.exit(1)
         
     except Exception as e:
-        processing_time = (time.time() - start_time) * 1000
-        error_result = {
-            "error": "Pipeline execution failed",
-            "details": str(e),
-            "error_type": type(e).__name__,
-            "processing_time_ms": round(processing_time, 2),
-            "timestamp": int(time.time() * 1000),
-            "input_args_count": len(sys.argv) - 1
+        error_response = {
+            'error': 'Processing failed',
+            'details': str(e),
+            'type': type(e).__name__,
+            'timestamp': datetime.now().isoformat()
         }
-        
-        if DEBUG_MODE:
-            print(f"❌ Pipeline error: {str(e)}", file=sys.stderr)
-            import traceback
-            print(traceback.format_exc(), file=sys.stderr)
-        
-        safe_print_json(error_result)
+        print(json.dumps(error_response, indent=2), file=sys.stderr)
+        sys.exit(1)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

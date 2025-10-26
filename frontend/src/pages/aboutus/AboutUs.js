@@ -16,34 +16,34 @@ const AboutUs = () => {
             expertise: ['React', 'Node.js', 'Python', 'AI/ML']
         },
         {
-            name: 'Priya Patel',
+            name: 'Umair Khan',
             title: 'AI Specialist',
-            handle: 'priyapatel',
+            handle: 'umairkhan',
             status: 'AI Researcher',
-            avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=500&h=500&fit=crop',
-            miniAvatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop',
+            avatarUrl: '/images/umair.jpg',
+            miniAvatarUrl: '/images/umair.jpg',
             role: 'Machine Learning Engineer',
             bio: 'Specializing in computer vision and geospatial analysis for claim verification.',
             expertise: ['TensorFlow', 'PyTorch', 'Computer Vision', 'NLP']
         },
         {
-            name: 'Rahul Verma',
+            name: 'Gayatri Gupta',
             title: 'Backend Architect',
-            handle: 'rahulverma',
+            handle: 'gayatrigupta',
             status: 'System Designer',
-            avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=500&h=500&fit=crop',
-            miniAvatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=500&h=500&fit=crop',
+            avatarUrl: '/images/gayatri2.jpg',
+            miniAvatarUrl: '/images/gayatri.jpg',
             role: 'DevOps & Backend Lead',
             bio: 'Expert in cloud infrastructure and real-time data processing for insurance analytics.',
             expertise: ['AWS', 'Docker', 'Kubernetes', 'Microservices']
         },
         {
-            name: 'Sneha Reddy',
+            name: 'Shradha',
             title: 'Frontend Engineer',
-            handle: 'snehareddy',
+            handle: 'shradha',
             status: 'UX Innovator',
-            avatarUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=500&h=500&fit=crop',
-            miniAvatarUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop',
+            avatarUrl: '/images/shradha.jpg',
+            miniAvatarUrl: '/images/shradha.jpg',
             role: 'UI/UX Developer',
             bio: 'Creating seamless user experiences for farmers with modern web technologies.',
             expertise: ['React', 'TypeScript', 'CSS', 'Design Systems']
@@ -52,36 +52,11 @@ const AboutUs = () => {
 
     const handleContactClick = (member) => {
         console.log(`Contacting ${member.name}`);
-        // Add your contact logic here
+        window.location.href = `mailto:contact@pbi-agriinsure.com?subject=Contact ${member.name}`;
     };
 
     return (
         <div className="about-us-page">
-            {/* Hero Section */}
-            {/* <section className="about-hero">
-                <div className="hero-content">
-                    <h1 className="hero-title">Meet Our Team</h1>
-                    <p className="hero-subtitle">
-                        We are Computer Engineers passionate about revolutionizing agricultural insurance through AI and technology
-                    </p>
-                    <div className="hero-stats">
-                        <div className="stat-item">
-                            <span className="stat-number">4</span>
-                            <span className="stat-label">Engineers</span>
-                        </div>
-                        <div className="stat-item">
-                            <span className="stat-number">10+</span>
-                            <span className="stat-label">Technologies</span>
-                        </div>
-                        <div className="stat-item">
-                            <span className="stat-number">1000+</span>
-                            <span className="stat-label">Farmers Helped</span>
-                        </div>
-                    </div>
-                </div>
-            </section> */}
-
-            {/* Mission Section */}
             <section className="mission-section">
                 <div className="mission-content">
                     <h2 className="section-title">Our Mission</h2>
@@ -127,7 +102,6 @@ const AboutUs = () => {
                 </div>
             </section>
 
-            {/* Team Cards Section */}
             <section className="team-section">
                 <h2 className="section-title">The Team</h2>
                 <div className="team-grid">
@@ -159,7 +133,6 @@ const AboutUs = () => {
                 </div>
             </section>
 
-            {/* What We Do Section */}
             <section className="what-we-do">
                 <h2 className="section-title">What We Built</h2>
                 <div className="features-grid">
@@ -186,12 +159,16 @@ const AboutUs = () => {
                 </div>
             </section>
 
-            {/* Contact CTA */}
             <section className="cta-section">
                 <div className="cta-content">
                     <h2>Ready to Transform Agriculture Insurance?</h2>
                     <p>Get in touch with our team to learn more about our technology</p>
-                    <button className="cta-button">Contact Us</button>
+                    <button 
+                        className="cta-button"
+                        onClick={() => window.location.href = 'mailto:contact@pbi-agriinsure.com'}
+                    >
+                        Contact Us
+                    </button>
                 </div>
             </section>
         </div>

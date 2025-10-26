@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../utils/api';
 import './dashboard.css';
+
 const Dashboard = () => {
   const [insurances, setInsurances] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -17,6 +18,9 @@ const Dashboard = () => {
 
   const fetchInsurances = async () => {
     try {
+      setLoading(true);
+      setError(null);
+      
       console.log('Fetching insurances from API...');
       const response = await api.get('/insurance/list');
 
@@ -28,7 +32,17 @@ const Dashboard = () => {
       }
     } catch (error) {
       console.error('Failed to fetch insurances:', error);
-      setError('Failed to load insurance plans. Please try again.');
+      
+      if (error.code === 'ECONNABORTED') {
+        setError('Request timeout. Please check your internet connection.');
+      } else if (error.response?.status === 404) {
+        setError('Insurance service not available. Please try again later.');
+      } else if (error.response?.status >= 500) {
+        setError('Server error. Our team has been notified.');
+      } else {
+        setError(error.response?.data?.message || 'Failed to load insurance plans. Please try again.');
+      }
+      
       setInsurances([]);
     } finally {
       setLoading(false);
@@ -56,7 +70,7 @@ const Dashboard = () => {
 
   const handleNewClaim = () => {
     if (insurances.length === 0) {
-      setError('No insurance plans available. Please check your connection and try again.');
+      fetchInsurances();
       return;
     }
     const insuranceSection = document.querySelector('.insurance-section');
@@ -72,32 +86,31 @@ const Dashboard = () => {
   return (
     <div className="dashboard-page">
       <div className="dashboard-container">
-        {/* Hero Section - IMAGE PLACEMENT #1: Farmer using phone in field */}
         <section className="hero-section">
           <div className="hero-content">
-            <div className="hero-text " style={{ justifyContent: "left", textAlign: "left" }}>
+            <div className="hero-text" style={{ justifyContent: "left", textAlign: "left" }}>
               <h1 className="hero-title">Photo & Video-Based Crop Insurance</h1>
               <p className="hero-description">
                 Submit real-time GPS-tagged evidence of crop damage. Get fair, fast claim verification powered by AI and blockchain technology—designed for climate-vulnerable smallholder farmers.
               </p>
               {user && (
-
-                <p className="hero-user">Signed in: XXXXXXXX{user.phoneNumber.slice(-2)}</p>
+                <p className="hero-user">
+                  Signed in: XXXXXXXX{user.phoneNumber?.slice(-2) || 'XX'}
+                </p>
               )}
             </div>
             <div className="hero-image">
-              {/* IMAGE: Farmer in field holding smartphone, capturing damaged crops */}
               <img
-                src="/images\frontFarmer.png"
+                src="/images/frontFarmer.png"
                 alt="Farmer using smartphone to document crop damage in the field"
                 className="hero-img"
                 style={{ height: "300px" }}
+                loading="lazy"
               />
             </div>
           </div>
         </section>
 
-        {/* Quick Action Buttons */}
         <div className="action-buttons-grid">
           <button onClick={handleViewClaims} className="action-btn action-btn-primary">
             View My Claims
@@ -107,7 +120,6 @@ const Dashboard = () => {
           </button>
         </div>
 
-        {/* How It Works Section - IMAGE PLACEMENT #2: Process icons/illustrations */}
         <section className="how-it-works-section">
           <h2 className="section-title">How It Works</h2>
           <p className="section-subtitle">
@@ -117,8 +129,7 @@ const Dashboard = () => {
           <div className="how-it-works-grid">
             <div className="how-card">
               <div className="how-icon">
-                {/* IMAGE: Icon showing phone with GPS pin */}
-                <img src="/images/gps-capture-icon.jpg" alt="GPS capture" />
+                <img src="/images/gps-capture-icon.jpg" alt="GPS capture" loading="lazy" />
               </div>
               <h3 className="how-card-title">1. Capture Evidence</h3>
               <p className="how-card-text">
@@ -128,8 +139,7 @@ const Dashboard = () => {
 
             <div className="how-card">
               <div className="how-icon">
-                {/* IMAGE: Icon showing AI brain analyzing image */}
-                <img src="/images/ai-verify-icon.jpg" alt="AI verification" />
+                <img src="/images/ai-verify-icon.jpg" alt="AI verification" loading="lazy" />
               </div>
               <h3 className="how-card-title">2. AI Verification</h3>
               <p className="how-card-text">
@@ -139,8 +149,12 @@ const Dashboard = () => {
 
             <div className="how-card">
               <div className="how-icon">
-                {/* IMAGE: Icon showing checkmark with blockchain chain */}
-                <img src="/images/claim-approval-icon.jpg" alt="Claim approval" style={{ width: "50px" }} />
+                <img 
+                  src="/images/claim-approval-icon.jpg" 
+                  alt="Claim approval" 
+                  style={{ width: "50px" }}
+                  loading="lazy"
+                />
               </div>
               <h3 className="how-card-title">3. Fast Approval</h3>
               <p className="how-card-text">
@@ -150,17 +164,16 @@ const Dashboard = () => {
           </div>
         </section>
 
-        {/* Why Choose Us Section - IMAGE PLACEMENT #3: Comparison graphic */}
         <section className="features-section">
           <h2 className="section-title">Why Choose PBI AgriInsure?</h2>
 
           <div className="features-comparison">
             <div className="comparison-visual">
-              {/* IMAGE: Side-by-side comparison - Traditional vs. Hybrid model */}
               <img
                 src="/images/traditional-vs-hybrid-model.png"
                 alt="Comparison showing traditional index-based insurance vs. our hybrid visual verification model"
                 className="comparison-img"
+                loading="lazy"
               />
             </div>
 
@@ -204,7 +217,6 @@ const Dashboard = () => {
           </div>
         </section>
 
-        {/* Impact Stats */}
         <section className="stats-section">
           <h2 className="section-title">Built for Climate-Vulnerable Regions</h2>
           <div className="stats-grid">
@@ -234,15 +246,14 @@ const Dashboard = () => {
           </div>
         </section>
 
-        {/* Trust & Technology Section - IMAGE PLACEMENT #4: Tech visualization */}
         <section className="trust-section">
           <div className="trust-content">
             <div className="trust-text">
               <h2 className="section-title">AI-Powered Fraud Prevention</h2>
-              <p className="trust-description ">
+              <p className="trust-description">
                 Our deepfake detection model analyzes device metadata, compression artifacts, and GPS consistency to flag manipulated media. High-risk cases undergo manual review, balancing speed with security.
               </p>
-              <ul className="trust-list ">
+              <ul className="trust-list">
                 <li className="trust-list-item">Device-level EXIF data validation</li>
                 <li className="trust-list-item">Compression artifact analysis</li>
                 <li className="trust-list-item">Geospatial coordinate matching</li>
@@ -250,17 +261,16 @@ const Dashboard = () => {
               </ul>
             </div>
             <div className="trust-visual">
-              {/* IMAGE: Diagram showing AI fraud detection layers */}
               <img
                 src="/images/ai-fraud-detection-layers.png"
                 alt="Visualization of AI fraud detection workflow with device metadata, deepfake analysis, and manual review"
                 className="trust-img"
+                loading="lazy"
               />
             </div>
           </div>
         </section>
 
-        {/* Insurance Plans Section */}
         <section className="insurance-section">
           <h2 className="section-title">Available Insurance Plans</h2>
 
@@ -288,7 +298,6 @@ const Dashboard = () => {
             />
           </div>
 
-
           {error && (
             <div className="error-banner">
               <p className="error-text">{error}</p>
@@ -312,14 +321,26 @@ const Dashboard = () => {
                   key={insurance._id}
                   className="insurance-card"
                   onClick={() => handleInsuranceSelect(insurance)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      handleInsuranceSelect(insurance);
+                    }
+                  }}
                 >
                   <div className="insurance-header">
                     <h3 className="insurance-name">
-                      <img src="/images/government-emblem.png" alt="Government Emblem" className="government-emblem" />
+                      <img 
+                        src="/images/government-emblem.png" 
+                        alt="Government Emblem" 
+                        className="government-emblem"
+                        loading="lazy"
+                      />
                       {insurance.name}
                     </h3>
-                    <span className={`insurance-badge insurance-badge-${insurance.type}`}>
-                      {insurance.type?.toUpperCase()}
+                    <span className={`insurance-badge insurance-badge-${insurance.type?.toLowerCase() || 'default'}`}>
+                      {insurance.type?.toUpperCase() || 'N/A'}
                     </span>
                   </div>
 
@@ -336,7 +357,13 @@ const Dashboard = () => {
                     )}
                   </div>
 
-                  <button className="insurance-select-btn">
+                  <button 
+                    className="insurance-select-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInsuranceSelect(insurance);
+                    }}
+                  >
                     Select This Insurance
                   </button>
                 </div>
@@ -363,7 +390,6 @@ const Dashboard = () => {
           )}
         </section>
 
-        {/* Bottom CTA - IMAGE PLACEMENT #5: Dashboard preview */}
         <section className="cta-section">
           <div className="cta-content">
             <div className="cta-text">
@@ -376,11 +402,11 @@ const Dashboard = () => {
               </button>
             </div>
             <div className="cta-preview">
-              {/* IMAGE: Screenshot of claim tracking dashboard */}
               <img
                 src="/images/dashboard-preview.png"
                 alt="Preview of PBI AgriInsure claim tracking dashboard showing real-time status updates"
                 className="cta-preview-img"
+                loading="lazy"
               />
             </div>
           </div>

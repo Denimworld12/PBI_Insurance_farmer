@@ -529,6 +529,156 @@ function mapPythonToFrontend(pythonResult) {
         full_analysis: pythonResult
     };
 }
+// ==================== AUTH ENDPOINTS ====================
+
+// Mock user storage
+const users = new Map();
+const otpStore = new Map();
+
+// Admin OTP (hardcoded for testing/admin access)
+const ADMIN_OTP = '258369';
+
+// Send OTP endpoint
+app.post('/api/auth/send-otp', async (req, res) => {
+    try {
+        const { phoneNumber } = req.body;
+
+        // Validate phone number
+        if (!phoneNumber || !/^[6-9]\d{9}$/.test(phoneNumber)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Valid 10-digit Indian mobile number required'
+            });
+        }
+
+        // Generate random OTP using crypto for security
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        // Store OTP
+        otpStore.set(phoneNumber, { otp, otpExpiry });
+
+        console.log(`📱 OTP generated for ${phoneNumber}: ${otp}`);
+        console.log(`🔑 Admin OTP (always works): ${ADMIN_OTP}`);
+
+        res.json({
+            success: true,
+            message: 'OTP sent successfully',
+            expiresIn: '10 minutes',
+            // Include OTP in development mode only
+            ...(process.env.NODE_ENV === 'development' && { 
+                devOTP: otp,
+                adminOTP: ADMIN_OTP 
+            })
+        });
+
+    } catch (error) {
+        console.error('❌ Send OTP error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to send OTP'
+        });
+    }
+});
+
+// Verify OTP endpoint
+app.post('/api/auth/verify-otp', async (req, res) => {
+    try {
+        const { phoneNumber, otp } = req.body;
+
+        if (!phoneNumber || !otp) {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone number and OTP required'
+            });
+        }
+
+        // Check if it's the admin OTP (always works)
+        if (otp === ADMIN_OTP) {
+            console.log(`🔐 Admin OTP used for ${phoneNumber}`);
+            
+            // Create/update user
+            if (!users.has(phoneNumber)) {
+                users.set(phoneNumber, {
+                    phoneNumber,
+                    createdAt: new Date().toISOString(),
+                    isVerified: true,
+                    isAdmin: true
+                });
+            }
+
+            // Generate token
+            const token = Buffer.from(`${phoneNumber}:${Date.now()}:admin`).toString('base64');
+
+            return res.json({
+                success: true,
+                message: 'Admin login successful',
+                token,
+                user: {
+                    phoneNumber,
+                    isVerified: true,
+                    isAdmin: true
+                }
+            });
+        }
+
+        // Check regular OTP
+        const storedOTP = otpStore.get(phoneNumber);
+
+        if (!storedOTP) {
+            return res.status(400).json({
+                success: false,
+                error: 'OTP not found. Please request a new one.'
+            });
+        }
+
+        if (storedOTP.otpExpiry < Date.now()) {
+            otpStore.delete(phoneNumber);
+            return res.status(400).json({
+                success: false,
+                error: 'OTP expired. Please request a new one.'
+            });
+        }
+
+        if (storedOTP.otp !== otp) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid OTP'
+            });
+        }
+
+        // OTP verified
+        if (!users.has(phoneNumber)) {
+            users.set(phoneNumber, {
+                phoneNumber,
+                createdAt: new Date().toISOString(),
+                isVerified: true
+            });
+        }
+
+        const token = Buffer.from(`${phoneNumber}:${Date.now()}`).toString('base64');
+        otpStore.delete(phoneNumber);
+
+        console.log(`✅ OTP verified for ${phoneNumber}`);
+
+        res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: {
+                phoneNumber,
+                isVerified: true
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Verify OTP error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to verify OTP'
+        });
+    }
+});
 
 // ==================== CLAIMS ENDPOINTS ====================
 
